@@ -111,7 +111,8 @@ function doGet(e) {
     return json(getPayrollAdmin_({
       bulan: e.parameter.bulan,
       tahun: e.parameter.tahun,
-      idToko: e.parameter.idToko
+      idToko: e.parameter.idToko,
+      includePaid: e.parameter.includePaid
     }));
   }
 
@@ -1818,22 +1819,69 @@ function deletePengumuman_(data){
 // MODUL PAYROLL DASAR
 // Sheet Payroll: Periode | ID | Nama | Toko | Hadir | Terlambat | Durasi | Gaji Pokok | Tunjangan | Potongan | Gaji Bersih | Status | Catatan | Disimpan Pada
 // ============================================================
+function normalizePayrollPeriod_(value) {
+  if (!value) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM");
+  }
+  const text = String(value).trim();
+  const direct = text.match(/^(\d{4})[-\/](\d{1,2})$/);
+  if (direct) return `${direct[1]}-${String(Number(direct[2])).padStart(2, "0")}`;
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return Utilities.formatDate(parsed, Session.getScriptTimeZone(), "yyyy-MM");
+  }
+  return text;
+}
+
 function getPayrollAdmin_(filter){
-  const bulan=Number(filter.bulan)||todayDate_().getMonth()+1, tahun=Number(filter.tahun)||todayDate_().getFullYear();
-  const periode=`${tahun}-${String(bulan).padStart(2,"0")}`; const idToko=String(filter.idToko||"");
+  const bulan=Number(filter.bulan)||todayDate_().getMonth()+1;
+  const tahun=Number(filter.tahun)||todayDate_().getFullYear();
+  const periode=`${tahun}-${String(bulan).padStart(2,"0")}`;
+  const idToko=String(filter.idToko||"");
+  const includePaid=String(filter.includePaid||"")==="1";
   const karyawan=getRows_(getSheet_(SHEET_KARYAWAN),10).filter(r=>String(r[6]||"").toLowerCase()==="aktif"&&(!idToko||String(r[9]||"")===idToko));
   const abs=getRows_(getSheet_(SHEET_ABSENSI),15).filter(r=>{const d=new Date(r[0]);return !isNaN(d)&&d.getMonth()+1===bulan&&d.getFullYear()===tahun;});
   const sh=getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
-  const saved=getRows_(sh,14).filter(r=>String(r[0])===periode); const smap={}; saved.forEach(r=>smap[String(r[1])]=r);
-  const items=karyawan.map(k=>{const id=String(k[0]); const a=abs.filter(r=>String(r[1])===id); const s=smap[id]||[]; const pokok=Number(s[7])||0,tunj=Number(s[8])||0,pot=Number(s[9])||0; return{
-    periode,idKaryawan:id,nama:String(k[2]||""),idToko:String(k[9]||""),hadir:a.length,terlambat:a.filter(r=>String(r[9]||"").toLowerCase().includes("terlambat")).length,
-    totalDurasi:a.reduce((n,r)=>n+parseDurasiMenit_(r[14]),0),gajiPokok:pokok,tunjangan:tunj,potongan:pot,gajiBersih:pokok+tunj-pot,status:String(s[11]||"Draft"),catatan:String(s[12]||"")};});
-  return{success:true,periode,items,summary:{jumlahKaryawan:items.length,totalGaji:items.reduce((n,x)=>n+x.gajiBersih,0),sudahDibayar:items.filter(x=>x.status==="Dibayar").length}};
+  const saved=getRows_(sh,14).filter(r=>normalizePayrollPeriod_(r[0])===periode);
+  const smap={}; saved.forEach(r=>smap[String(r[1]||"").trim()]=r);
+  const allItems=karyawan.map(k=>{
+    const id=String(k[0]||"").trim();
+    const a=abs.filter(r=>String(r[1]||"").trim()===id);
+    const s=smap[id]||[];
+    const pokok=Number(s[7])||0,tunj=Number(s[8])||0,pot=Number(s[9])||0;
+    return {
+      periode,idKaryawan:id,nama:String(k[2]||""),idToko:String(k[9]||""),hadir:a.length,
+      terlambat:a.filter(r=>String(r[9]||"").toLowerCase().includes("terlambat")).length,
+      totalDurasi:a.reduce((n,r)=>n+parseDurasiMenit_(r[14]),0),gajiPokok:pokok,tunjangan:tunj,potongan:pot,
+      gajiBersih:pokok+tunj-pot,status:String(s[11]||"Draft"),catatan:String(s[12]||"")
+    };
+  });
+  const paidItems=allItems.filter(x=>x.status==="Dibayar");
+  const items=includePaid?allItems:allItems.filter(x=>x.status!=="Dibayar");
+  return {
+    success:true,periode,items,paidItems,
+    summary:{
+      jumlahKaryawan:items.length,
+      totalGaji:items.reduce((n,x)=>n+x.gajiBersih,0),
+      sudahDibayar:paidItems.length,
+      totalSemuaKaryawan:allItems.length
+    }
+  };
 }
+
 function savePayrollBatch_(data){
-  const items=Array.isArray(data.items)?data.items:[]; if(!items.length)return{success:false,message:"Tidak ada data payroll untuk disimpan."};
+  const items=Array.isArray(data.items)?data.items:[];
+  if(!items.length)return{success:false,message:"Tidak ada data payroll untuk disimpan."};
   const sh=getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
-  const existing=getRows_(sh,14); items.forEach(x=>{const row=[x.periode,x.idKaryawan,x.nama,x.idToko,Number(x.hadir)||0,Number(x.terlambat)||0,Number(x.totalDurasi)||0,Number(x.gajiPokok)||0,Number(x.tunjangan)||0,Number(x.potongan)||0,(Number(x.gajiPokok)||0)+(Number(x.tunjangan)||0)-(Number(x.potongan)||0),String(x.status||"Draft"),String(x.catatan||""),new Date()]; const idx=existing.findIndex(r=>String(r[0])===String(x.periode)&&String(r[1])===String(x.idKaryawan)); if(idx>=0)sh.getRange(idx+2,1,1,14).setValues([row]);else sh.appendRow(row);});
+  sh.getRange("A:A").setNumberFormat("@");
+  const existing=getRows_(sh,14);
+  items.forEach(x=>{
+    const periode=normalizePayrollPeriod_(x.periode);
+    const row=[periode,x.idKaryawan,x.nama,x.idToko,Number(x.hadir)||0,Number(x.terlambat)||0,Number(x.totalDurasi)||0,Number(x.gajiPokok)||0,Number(x.tunjangan)||0,Number(x.potongan)||0,(Number(x.gajiPokok)||0)+(Number(x.tunjangan)||0)-(Number(x.potongan)||0),String(x.status||"Draft"),String(x.catatan||""),new Date()];
+    const idx=existing.findIndex(r=>normalizePayrollPeriod_(r[0])===periode&&String(r[1]||"").trim()===String(x.idKaryawan||"").trim());
+    if(idx>=0)sh.getRange(idx+2,1,1,14).setValues([row]);else sh.appendRow(row);
+  });
   return{success:true,message:`${items.length} data payroll berhasil disimpan.`};
 }
 
@@ -2025,7 +2073,7 @@ function getPortalPayroll_(token, bulan, tahun) {
   const y = Number(tahun) || todayDate_().getFullYear();
   const sh = getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
   const periode = `${y}-${String(m).padStart(2,"0")}`;
-  const row = getRows_(sh,14).find(r => String(r[0] || "") === periode && String(r[1] || "") === k.id);
+  const row = getRows_(sh,14).find(r => normalizePayrollPeriod_(r[0]) === periode && String(r[1] || "").trim() === k.id);
   if (!row) return { success:true, payroll:null, message:"Slip gaji periode ini belum tersedia." };
   return { success:true, payroll:{ periode, nama:String(row[2]||""), hadir:Number(row[4])||0, terlambat:Number(row[5])||0, totalDurasi:Number(row[6])||0, gajiPokok:Number(row[7])||0, tunjangan:Number(row[8])||0, potongan:Number(row[9])||0, gajiBersih:Number(row[10])||0, status:String(row[11]||"Draft"), catatan:String(row[12]||"") } };
 }
