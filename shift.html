@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jadwal Shift - EMS</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-logo">E</div><div><h2>EMS</h2><small>Employee Management System</small></div></div>
+    <nav>
+      <a href="index.html"><i data-lucide="layout-dashboard"></i>Dashboard</a>
+      <a href="karyawan.html"><i data-lucide="users"></i>Karyawan</a>
+      <a href="absen.html"><i data-lucide="scan-line"></i>Absensi</a>
+      <a class="active" href="shift.html"><i data-lucide="calendar-clock"></i>Jadwal Shift</a>
+      <a href="izin.html"><i data-lucide="file-text"></i>Izin & Cuti</a>
+      <a href="rekap.html"><i data-lucide="bar-chart-3"></i>Rekap Absensi</a>
+      <a href="qr-toko.html"><i data-lucide="qr-code"></i>QR Absensi Toko</a>
+      <a href="pengaturan.html"><i data-lucide="settings"></i>Pengaturan</a>
+    </nav>
+  </aside>
+
+  <main class="main schedule-main">
+    <header class="header schedule-header">
+      <div><h1>Jadwal Shift</h1><p>Atur jadwal mingguan tanpa mengubah shift default karyawan</p></div>
+      <button id="saveScheduleButton" class="schedule-primary-button" type="button" onclick="saveSchedule()"><i data-lucide="save"></i>Simpan Jadwal</button>
+    </header>
+
+    <section class="panel schedule-toolbar">
+      <div class="schedule-toolbar-grid">
+        <label><span>Toko</span><select id="storeFilter" onchange="loadSchedule()"><option value="">Semua Toko</option></select></label>
+        <label><span>Minggu</span><input id="weekPicker" type="date" onchange="jumpToWeek(this.value)"></label>
+        <div class="schedule-week-nav">
+          <button type="button" onclick="moveWeek(-1)" title="Minggu sebelumnya"><i data-lucide="chevron-left"></i></button>
+          <button type="button" onclick="goToday()">Minggu Ini</button>
+          <button type="button" onclick="moveWeek(1)" title="Minggu berikutnya"><i data-lucide="chevron-right"></i></button>
+        </div>
+        <button class="schedule-copy-button" type="button" onclick="copyPreviousWeek()"><i data-lucide="copy"></i>Salin Minggu Lalu</button>
+      </div>
+      <div class="schedule-period"><i data-lucide="calendar-days"></i><strong id="periodLabel">-</strong><span id="changeInfo">Belum ada perubahan</span></div>
+    </section>
+
+    <section class="schedule-summary-grid">
+      <article class="summary-card"><span class="summary-icon purple-summary"><i data-lucide="users"></i></span><div><small>Karyawan Ditampilkan</small><strong id="summaryEmployees">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon green"><i data-lucide="calendar-check"></i></span><div><small>Jadwal Khusus</small><strong id="summaryOverrides">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon cyan-summary"><i data-lucide="clock-3"></i></span><div><small>Jenis Shift</small><strong id="summaryShifts">0</strong></div></article>
+    </section>
+
+    <section class="panel schedule-table-panel">
+      <div class="schedule-table-heading"><div><h3>Jadwal Mingguan</h3><p>Pilihan “Default” akan mengikuti shift utama pada data karyawan.</p></div><button class="schedule-refresh-button" type="button" onclick="loadSchedule()"><i data-lucide="refresh-cw"></i></button></div>
+      <div class="schedule-table-scroll">
+        <table class="schedule-table">
+          <thead id="scheduleHead"></thead>
+          <tbody id="scheduleBody"><tr><td class="schedule-empty">Memuat jadwal...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script>
+    let stores=[], shifts=[], employees=[], assignments={}, currentMonday=startOfWeek(new Date()), dirty=false;
+    const esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+    const pad=n=>String(n).padStart(2,"0");
+    const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    function parseLocal(value){const [y,m,d]=String(value).split("-").map(Number);return new Date(y,m-1,d);}
+    function startOfWeek(date){const d=new Date(date.getFullYear(),date.getMonth(),date.getDate());const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d;}
+    function addDays(date,n){const d=new Date(date);d.setDate(d.getDate()+n);return d;}
+    function formatDate(d,options={day:"numeric",month:"short"}){return new Intl.DateTimeFormat("id-ID",options).format(d);}
+    async function get(params){const u=new URL(EMS_API_URL);Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v??""));const r=await fetch(u);const j=await r.json();if(!j.success)throw new Error(j.message||"Permintaan gagal.");return j;}
+    async function post(body){const r=await fetch(EMS_API_URL,{method:"POST",body:JSON.stringify(body)});const j=await r.json();if(!j.success)throw new Error(j.message||"Permintaan gagal.");return j;}
+    function weekDates(){return Array.from({length:7},(_,i)=>addDays(currentMonday,i));}
+    function setDirty(value=true){dirty=value;changeInfo.textContent=value?"Ada perubahan belum disimpan":"Semua perubahan tersimpan";changeInfo.classList.toggle("dirty",value);}
+    function jumpToWeek(value){if(!value)return;currentMonday=startOfWeek(parseLocal(value));loadSchedule();}
+    function moveWeek(delta){currentMonday=addDays(currentMonday,delta*7);loadSchedule();}
+    function goToday(){currentMonday=startOfWeek(new Date());loadSchedule();}
+    async function loadReferences(){const [a,b]=await Promise.all([get({action:"listToko"}),get({action:"listShift"})]);stores=a.items||[];shifts=b.items||[];storeFilter.innerHTML=`<option value="">Semua Toko</option>${stores.map(x=>`<option value="${esc(x.id)}">${esc(x.nama)}</option>`).join("")}`;}
+    async function loadSchedule(){
+      const dates=weekDates();weekPicker.value=iso(currentMonday);periodLabel.textContent=`${formatDate(dates[0],{day:"numeric",month:"long"})} – ${formatDate(dates[6],{day:"numeric",month:"long",year:"numeric"})}`;
+      scheduleBody.innerHTML=`<tr><td colspan="8" class="schedule-empty">Memuat jadwal...</td></tr>`;setDirty(false);
+      try{const data=await get({action:"getJadwalAdmin",tanggalMulai:iso(dates[0]),tanggalAkhir:iso(dates[6]),idToko:storeFilter.value});employees=data.karyawan||[];assignments={};(data.items||[]).forEach(x=>assignments[`${x.idKaryawan}|${x.tanggal}`]=x.shift);render();}
+      catch(e){scheduleBody.innerHTML=`<tr><td colspan="8" class="schedule-empty error">${esc(e.message)}</td></tr>`;}
+    }
+    function render(){
+      const dates=weekDates(),today=iso(new Date());
+      scheduleHead.innerHTML=`<tr><th class="schedule-sticky-col">Karyawan</th>${dates.map(d=>`<th class="${iso(d)===today?"today":""}"><b>${formatDate(d,{weekday:"short"})}</b><span>${formatDate(d)}</span></th>`).join("")}</tr>`;
+      summaryEmployees.textContent=employees.length;summaryOverrides.textContent=Object.keys(assignments).length;summaryShifts.textContent=shifts.length;
+      if(!employees.length){scheduleBody.innerHTML=`<tr><td colspan="8" class="schedule-empty"><i data-lucide="calendar-x"></i><b>Tidak ada karyawan aktif</b><span>Pilih toko lain atau tambahkan karyawan aktif.</span></td></tr>`;lucide.createIcons();return;}
+      scheduleBody.innerHTML=employees.map(emp=>`<tr><td class="schedule-sticky-col"><div class="schedule-person"><span>${esc(emp.nama.split(/\s+/).slice(0,2).map(x=>x[0]||"").join("").toUpperCase())}</span><div><b>${esc(emp.nama)}</b><small>${esc(emp.namaToko)} · Default: ${esc(emp.shiftDefault||"-")}</small></div></div></td>${dates.map(d=>{const key=`${emp.id}|${iso(d)}`,value=assignments[key]||"";return `<td class="${iso(d)===today?"today-cell":""}"><select data-key="${esc(key)}" onchange="changeAssignment(this)"><option value="">Default (${esc(emp.shiftDefault||"-")})</option>${shifts.map(s=>`<option value="${esc(s.nama)}" ${s.nama===value?"selected":""}>${esc(s.nama)} · ${esc(s.masuk)}–${esc(s.pulang)}</option>`).join("")}</select></td>`;}).join("")}</tr>`).join("");lucide.createIcons();
+    }
+    function changeAssignment(select){assignments[select.dataset.key]=select.value;if(!select.value)delete assignments[select.dataset.key];setDirty(true);summaryOverrides.textContent=Object.keys(assignments).length;}
+    async function saveSchedule(){
+      const button=saveScheduleButton;button.disabled=true;
+      const items=[];document.querySelectorAll("#scheduleBody select[data-key]").forEach(select=>{const [id,tanggal]=select.dataset.key.split("|");items.push({idKaryawan:id,tanggal,shift:select.value});});
+      try{const data=await post({action:"saveJadwalBatch",tanggalMulai:iso(currentMonday),tanggalAkhir:iso(addDays(currentMonday,6)),idToko:storeFilter.value,items});setDirty(false);await Swal.fire({icon:"success",title:"Jadwal tersimpan",text:data.message,timer:1500,showConfirmButton:false});await loadSchedule();}
+      catch(e){Swal.fire("Gagal",e.message,"error");}finally{button.disabled=false;}
+    }
+    async function copyPreviousWeek(){
+      const result=await Swal.fire({icon:"question",title:"Salin jadwal minggu lalu?",text:"Jadwal khusus minggu ini akan diganti mengikuti minggu sebelumnya. Shift default tetap tidak berubah.",showCancelButton:true,confirmButtonText:"Ya, salin",cancelButtonText:"Batal"});if(!result.isConfirmed)return;
+      try{const prev=addDays(currentMonday,-7);const data=await get({action:"getJadwalAdmin",tanggalMulai:iso(prev),tanggalAkhir:iso(addDays(prev,6)),idToko:storeFilter.value});assignments={};(data.items||[]).forEach(x=>{const shifted=iso(addDays(parseLocal(x.tanggal),7));assignments[`${x.idKaryawan}|${shifted}`]=x.shift;});render();setDirty(true);Swal.fire({icon:"success",title:"Jadwal disalin",text:"Periksa lalu klik Simpan Jadwal.",timer:1700,showConfirmButton:false});}
+      catch(e){Swal.fire("Gagal",e.message,"error");}
+    }
+    window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue="";}});
+    document.addEventListener("DOMContentLoaded",async()=>{lucide.createIcons();await loadReferences();await loadSchedule();});
+  </script>
+</body>
+</html>

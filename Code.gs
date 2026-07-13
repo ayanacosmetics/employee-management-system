@@ -82,6 +82,15 @@ function doGet(e) {
     );
   }
 
+  // Endpoint administrasi jadwal shift. Tidak mengubah endpoint shift karyawan yang dipakai absensi.
+  if (action === "getJadwalAdmin") {
+    return json(getJadwalAdmin_({
+      tanggalMulai: e.parameter.tanggalMulai,
+      tanggalAkhir: e.parameter.tanggalAkhir,
+      idToko: e.parameter.idToko
+    }));
+  }
+
   return json({
     success: true,
     message: "EMS API aktif"
@@ -116,6 +125,10 @@ function doPost(e) {
 
   if (action === "setStatusKaryawan") {
     return json(setStatusKaryawan_(data));
+  }
+
+  if (action === "saveJadwalBatch") {
+    return json(saveJadwalBatch_(data));
   }
 
   return json({
@@ -1476,4 +1489,131 @@ function generateBarcodeKaryawan_(rows, id) {
     candidate = `89990${String(counter).padStart(5, "0")}`;
   }
   return candidate;
+}
+
+
+// ===== MODUL JADWAL SHIFT ADMIN =====
+// Sheet Jadwal tetap memakai struktur lama: Tanggal | ID Karyawan | Shift.
+function getJadwalAdmin_(params) {
+  params = params || {};
+  const mulai = parseTanggal_(params.tanggalMulai);
+  const akhir = parseTanggal_(params.tanggalAkhir);
+  const idToko = String(params.idToko || "").trim();
+
+  if (!mulai || !akhir) {
+    return { success: false, message: "Tanggal mulai dan tanggal akhir wajib diisi." };
+  }
+  if (normalizeDate_(mulai) > normalizeDate_(akhir)) {
+    return { success: false, message: "Rentang tanggal jadwal tidak valid." };
+  }
+
+  const tokoMap = {};
+  listToko_().items.forEach(item => tokoMap[item.id] = item.nama);
+
+  const karyawan = getRows_(getSheet_(SHEET_KARYAWAN), 10)
+    .filter(row => String(row[6] || "").trim().toLowerCase() === "aktif")
+    .filter(row => !idToko || String(row[9] || "").trim() === idToko)
+    .map(row => ({
+      id: String(row[0] || "").trim(),
+      nama: String(row[2] || "").trim(),
+      jabatan: String(row[4] || "").trim(),
+      shiftDefault: String(row[5] || "").trim(),
+      idToko: String(row[9] || "").trim(),
+      namaToko: tokoMap[String(row[9] || "").trim()] || String(row[9] || "").trim()
+    }))
+    .sort((a, b) => a.namaToko.localeCompare(b.namaToko) || a.nama.localeCompare(b.nama));
+
+  const allowedIds = new Set(karyawan.map(item => item.id));
+  const startKey = normalizeDate_(mulai);
+  const endKey = normalizeDate_(akhir);
+  const items = getRows_(getSheet_(SHEET_JADWAL), 3)
+    .map(row => ({
+      tanggal: normalizeDate_(row[0]),
+      idKaryawan: String(row[1] || "").trim(),
+      shift: String(row[2] || "").trim()
+    }))
+    .filter(item => item.tanggal && item.tanggal >= startKey && item.tanggal <= endKey)
+    .filter(item => allowedIds.has(item.idKaryawan));
+
+  return {
+    success: true,
+    periode: { tanggalMulai: startKey, tanggalAkhir: endKey },
+    karyawan,
+    shifts: listShift_().items,
+    items
+  };
+}
+
+function saveJadwalBatch_(data) {
+  data = data || {};
+  const mulai = parseTanggal_(data.tanggalMulai);
+  const akhir = parseTanggal_(data.tanggalAkhir);
+  const idToko = String(data.idToko || "").trim();
+  const items = Array.isArray(data.items) ? data.items : [];
+
+  if (!mulai || !akhir || normalizeDate_(mulai) > normalizeDate_(akhir)) {
+    return { success: false, message: "Rentang tanggal jadwal tidak valid." };
+  }
+
+  const startKey = normalizeDate_(mulai);
+  const endKey = normalizeDate_(akhir);
+  const shiftNames = new Set(listShift_().items.map(item => item.nama.toLowerCase()));
+  const employeeRows = getRows_(getSheet_(SHEET_KARYAWAN), 10);
+  const employeeMap = {};
+  employeeRows.forEach(row => {
+    const id = String(row[0] || "").trim();
+    if (id) employeeMap[id] = {
+      nama: String(row[2] || "").trim(),
+      idToko: String(row[9] || "").trim()
+    };
+  });
+
+  const submitted = new Map();
+  for (const raw of items) {
+    const idKaryawan = String(raw.idKaryawan || "").trim();
+    const tanggal = normalizeDate_(raw.tanggal);
+    const shift = String(raw.shift || "").trim();
+    const employee = employeeMap[idKaryawan];
+
+    if (!employee || !tanggal || tanggal < startKey || tanggal > endKey) continue;
+    if (idToko && employee.idToko !== idToko) continue;
+    if (shift && !shiftNames.has(shift.toLowerCase())) {
+      return { success: false, message: `Shift "${shift}" tidak ditemukan.` };
+    }
+    submitted.set(`${tanggal}|${idKaryawan}`, { tanggal, idKaryawan, shift, nama: employee.nama });
+  }
+
+  const sh = getSheet_(SHEET_JADWAL);
+  const rows = getRows_(sh, 3);
+  const existingByKey = new Map();
+  rows.forEach((row, index) => {
+    const tanggal = normalizeDate_(row[0]);
+    const id = String(row[1] || "").trim();
+    if (tanggal && id) existingByKey.set(`${tanggal}|${id}`, index + 2);
+  });
+
+  const deleteRows = [];
+  const updates = [];
+  const appends = [];
+  submitted.forEach((item, key) => {
+    const sheetRow = existingByKey.get(key);
+    if (!item.shift) {
+      if (sheetRow) deleteRows.push(sheetRow);
+      return;
+    }
+    const values = [parseTanggal_(item.tanggal), item.idKaryawan, item.shift];
+    if (sheetRow) updates.push({ row: sheetRow, values });
+    else appends.push(values);
+  });
+
+  updates.forEach(item => sh.getRange(item.row, 1, 1, 3).setValues([item.values]));
+  deleteRows.sort((a, b) => b - a).forEach(row => sh.deleteRow(row));
+  if (appends.length) sh.getRange(sh.getLastRow() + 1, 1, appends.length, 3).setValues(appends);
+
+  simpanLog_("Admin", "Memperbarui jadwal shift", `${startKey} s.d. ${endKey} | ${idToko || "Semua toko"}`);
+  return {
+    success: true,
+    message: `${updates.length + appends.length} jadwal khusus disimpan dan ${deleteRows.length} jadwal dikembalikan ke shift default.`,
+    summary: { diperbarui: updates.length, ditambahkan: appends.length, dihapus: deleteRows.length }
+  };
 }
