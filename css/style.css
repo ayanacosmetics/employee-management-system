@@ -998,3 +998,33 @@ nav a.active {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+.shift-info-card {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 22px 0;
+}
+
+.shift-info-card > div {
+  padding: 14px 12px;
+  border: 1px solid #ebe9f4;
+  border-radius: 13px;
+  background: #fafafe;
+}
+
+.shift-info-card small {
+  display: block;
+  margin-bottom: 6px;
+  color: #8a8d9e;
+}
+
+.shift-info-card b {
+  color: #2d234d;
+}
+
+@media (max-width: 600px) {
+  .shift-info-card {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

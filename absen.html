@@ -88,24 +88,13 @@
             <small>Akurasi GPS</small>
             <b id="accuracyText">-</b>
           </div>
-        
+        </div>
+
         <div class="shift-info-card">
-          <div>
-            <small>Shift Hari Ini</small>
-            <b id="shiftName">Menunggu PIN</b>
-          </div>
-          <div>
-            <small>Jam Masuk</small>
-            <b id="shiftStart">-</b>
-          </div>
-          <div>
-            <small>Jam Pulang</small>
-            <b id="shiftEnd">-</b>
-          </div>
-          <div>
-            <small>Status</small>
-            <b id="shiftStatus">Masukkan PIN</b>
-          </div>
+          <div><small>Shift Hari Ini</small><b id="shiftName">Menunggu PIN</b></div>
+          <div><small>Jam Masuk</small><b id="shiftStart">-</b></div>
+          <div><small>Jam Pulang</small><b id="shiftEnd">-</b></div>
+          <div><small>Status</small><b id="shiftStatus">Masukkan PIN</b></div>
         </div>
 
         <button class="attendance-primary" onclick="checkLocation()">
@@ -303,6 +292,7 @@
     let currentToko = null;
     let currentShift = null;
     let currentEmployee = null;
+    let shiftRequestToken = 0;
 
     const params = new URLSearchParams(
         window.location.search
@@ -517,7 +507,6 @@
             "Dalam area toko";
 
             updateSubmitButton();
-        if(currentPin.length===4){loadEmployeeAndShift();}
 
             Swal.fire({
             icon: "success",
@@ -688,82 +677,88 @@
     }
 
     function updatePinDisplay() {
-        const dots =
-        document.querySelectorAll(
-            "#pinDisplay span"
-        );
-
-        dots.forEach((dot, index) => {
-          dot.classList.toggle(
-            "filled",
-            index < currentPin.length
-          );
-        });
-
-        updateSubmitButton();
-
-    }
-
-    
-    async function loadEmployeeAndShift() {
-
-      if(currentPin.length!==4) return;
-
-      try{
-
-        const res=await fetch(
-          `${EMS_API_URL}?action=getKaryawanByPin&pin=${encodeURIComponent(currentPin)}`
-        );
-
-        const data=await res.json();
-
-        if(!data.success){
-          document.getElementById("shiftStatus").innerText="PIN tidak ditemukan";
-          return;
-        }
-
-        currentEmployee=data.karyawan;
-
-        if(currentEmployee.idToko!==tokoId){
-          document.getElementById("shiftStatus").innerText="Bukan toko ini";
-          return;
-        }
-
-        const resShift=await fetch(
-          `${EMS_API_URL}?action=getShiftKaryawan&idKaryawan=${currentEmployee.id}`
-        );
-
-        const shiftData=await resShift.json();
-
-        if(!shiftData.success){
-          document.getElementById("shiftStatus").innerText=shiftData.message;
-          return;
-        }
-
-        currentShift=shiftData.shift;
-
-        shiftName.innerText=currentShift.nama;
-        shiftStart.innerText=currentShift.masuk;
-        shiftEnd.innerText=currentShift.pulang;
-
-        const now=new Date();
-        const t=currentShift.telat.split(":");
-        const batas=new Date();
-        batas.setHours(Number(t[0]),Number(t[1]),0,0);
-
-        if(now<=batas){
-          shiftStatus.innerText="Tepat waktu";
-        }else{
-          const telat=Math.floor((now-batas)/60000);
-          shiftStatus.innerText=`Terlambat ${telat} menit`;
-        }
-
-      }catch(e){
-        shiftStatus.innerText="Shift gagal dimuat";
+      const dots = document.querySelectorAll("#pinDisplay span");
+      dots.forEach((dot, index) => {
+        dot.classList.toggle("filled", index < currentPin.length);
+      });
+      updateSubmitButton();
+      if (currentPin.length === 4) {
+        loadEmployeeAndShift();
+      } else {
+        resetShiftInfo();
       }
-
     }
 
+    function resetShiftInfo() {
+      shiftRequestToken++;
+      currentEmployee = null;
+      currentShift = null;
+      document.getElementById("shiftName").innerText = "Menunggu PIN";
+      document.getElementById("shiftStart").innerText = "-";
+      document.getElementById("shiftEnd").innerText = "-";
+      document.getElementById("shiftStatus").innerText = "Masukkan PIN";
+    }
+
+    async function loadEmployeeAndShift() {
+      const token = ++shiftRequestToken;
+      document.getElementById("shiftName").innerText = "Memeriksa...";
+      document.getElementById("shiftStatus").innerText = "Memuat data";
+      try {
+        const employeeResponse = await fetch(`${EMS_API_URL}?action=getKaryawanByPin&pin=${encodeURIComponent(currentPin)}`);
+        const employeeData = await employeeResponse.json();
+        if (token !== shiftRequestToken) return;
+        if (!employeeData.success) {
+          currentEmployee = null;
+          currentShift = null;
+          document.getElementById("shiftName").innerText = "-";
+          document.getElementById("shiftStart").innerText = "-";
+          document.getElementById("shiftEnd").innerText = "-";
+          document.getElementById("shiftStatus").innerText = "PIN tidak ditemukan";
+          return;
+        }
+        currentEmployee = employeeData.karyawan;
+        if (String(currentEmployee.idToko || "").trim() !== String(tokoId || "").trim()) {
+          currentEmployee = null;
+          currentShift = null;
+          document.getElementById("shiftName").innerText = "-";
+          document.getElementById("shiftStart").innerText = "-";
+          document.getElementById("shiftEnd").innerText = "-";
+          document.getElementById("shiftStatus").innerText = "Tidak terdaftar di toko ini";
+          return;
+        }
+        const shiftResponse = await fetch(`${EMS_API_URL}?action=getShiftKaryawan&idKaryawan=${encodeURIComponent(currentEmployee.id)}`);
+        const shiftData = await shiftResponse.json();
+        if (token !== shiftRequestToken) return;
+        if (!shiftData.success) throw new Error(shiftData.message || "Shift tidak ditemukan.");
+        currentShift = shiftData.shift;
+        document.getElementById("shiftName").innerText = currentShift.nama || "-";
+        document.getElementById("shiftStart").innerText = currentShift.masuk || "-";
+        document.getElementById("shiftEnd").innerText = currentShift.pulang || "-";
+        updateShiftStatus();
+      } catch (error) {
+        if (token !== shiftRequestToken) return;
+        currentEmployee = null;
+        currentShift = null;
+        document.getElementById("shiftName").innerText = "-";
+        document.getElementById("shiftStart").innerText = "-";
+        document.getElementById("shiftEnd").innerText = "-";
+        document.getElementById("shiftStatus").innerText = "Shift gagal dimuat";
+      }
+    }
+
+    function updateShiftStatus() {
+      if (!currentShift) return;
+      const now = new Date();
+      const lateParts = String(currentShift.telat || currentShift.masuk || "00:00").split(":").map(Number);
+      const lateTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), lateParts[0] || 0, lateParts[1] || 0, 0, 0);
+      const statusEl = document.getElementById("shiftStatus");
+      if (now <= lateTime) {
+        statusEl.innerText = "Masih tepat waktu";
+        return;
+      }
+      const terlambat = Math.floor((now.getTime() - lateTime.getTime()) / 60000);
+      statusEl.innerText = `Terlambat ${terlambat} menit`;
+    }
 
     function updateSubmitButton() {
         const button =
@@ -976,6 +971,8 @@
         currentLongitude = null;
         currentAccuracy = null;
         currentDistance = null;
+
+        resetShiftInfo();
 
         document.getElementById(
         "locationStatus"
