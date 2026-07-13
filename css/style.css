@@ -656,3 +656,17 @@ nav a.active {
     margin-top: 36px;
   }
 }
+
+.qr-dashboard-button {
+  min-height: 46px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  color: white;
+  background: #6d28d9;
+  text-decoration: none;
+  font-weight: 700;
+}

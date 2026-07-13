@@ -690,14 +690,15 @@
 
         try {
         const payload = {
-            action: "absen",
-            idToko: tokoId,
-            pin: currentPin,
-            latitude: currentLatitude,
-            longitude: currentLongitude,
-            accuracy: currentAccuracy,
-            selfieBase64: selfieData,
-            device: navigator.userAgent
+          action: "absen",
+          idToko: tokoId,
+          barcode: employeeBarcode,
+          pin: currentPin,
+          latitude: currentLatitude,
+          longitude: currentLongitude,
+          accuracy: currentAccuracy,
+          selfieBase64: selfieData,
+          device: navigator.userAgent
         };
 
         const res = await fetch(
