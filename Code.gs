@@ -26,6 +26,19 @@ function doGet(e) {
     return json(getKaryawanByPin_(e.parameter.pin));
   }
 
+  // Endpoint administrasi karyawan. Endpoint absensi lama tetap dipertahankan.
+  if (action === "listKaryawanAdmin") {
+    return json(listKaryawanAdmin_({
+      idToko: e.parameter.idToko,
+      status: e.parameter.status,
+      cari: e.parameter.cari
+    }));
+  }
+
+  if (action === "listShift") {
+    return json(listShift_());
+  }
+
   if (action === "getShiftKaryawan") {
     return json(
       getShiftKaryawan_(
@@ -95,6 +108,14 @@ function doPost(e) {
 
   if (action === "saveIzin") {
     return json(saveIzin_(data));
+  }
+
+  if (action === "saveKaryawan") {
+    return json(saveKaryawan_(data));
+  }
+
+  if (action === "setStatusKaryawan") {
+    return json(setStatusKaryawan_(data));
   }
 
   return json({
@@ -1298,4 +1319,161 @@ function formatDateTimeIso_(value) {
     Session.getScriptTimeZone(),
     "yyyy-MM-dd'T'HH:mm:ss"
   );
+}
+
+
+// ============================================================
+// MODUL ADMINISTRASI KARYAWAN
+// Ditambahkan tanpa mengubah endpoint absensi yang sudah berjalan.
+// Struktur sheet tetap:
+// ID | Barcode | Nama | PIN | Jabatan | Shift Default | Status | No HP | Foto | ID Toko
+// ============================================================
+function listKaryawanAdmin_(filter) {
+  const idToko = String((filter && filter.idToko) || "").trim().toLowerCase();
+  const status = String((filter && filter.status) || "").trim().toLowerCase();
+  const cari = String((filter && filter.cari) || "").trim().toLowerCase();
+
+  const tokoMap = {};
+  listToko_().items.forEach(toko => tokoMap[String(toko.id).trim()] = toko.nama);
+
+  const rows = getRows_(getSheet_(SHEET_KARYAWAN), 10);
+  const items = rows
+    .filter(row => String(row[0] || "").trim())
+    .map(row => {
+      const item = mapKaryawan_(row);
+      item.pin = String(row[3] || "").trim();
+      item.namaToko = tokoMap[item.idToko] || item.idToko || "-";
+      return item;
+    })
+    .filter(item => !idToko || item.idToko.toLowerCase() === idToko)
+    .filter(item => !status || item.status.toLowerCase() === status)
+    .filter(item => {
+      if (!cari) return true;
+      return [item.id, item.barcode, item.nama, item.jabatan, item.noHp, item.namaToko]
+        .some(value => String(value || "").toLowerCase().includes(cari));
+    })
+    .sort((a, b) => a.nama.localeCompare(b.nama, "id"));
+
+  const aktif = items.filter(item => item.status.toLowerCase() === "aktif").length;
+  const nonaktif = items.length - aktif;
+
+  return { success: true, summary: { total: items.length, aktif, nonaktif }, items };
+}
+
+function listShift_() {
+  const rows = getRows_(getSheet_(SHEET_SHIFT), 4);
+  const items = rows
+    .filter(row => String(row[0] || "").trim())
+    .map(row => ({
+      nama: String(row[0] || "").trim(),
+      masuk: formatJam_(row[1]),
+      pulang: formatJam_(row[2]),
+      telat: formatJam_(row[3])
+    }));
+  return { success: true, items };
+}
+
+function saveKaryawan_(data) {
+  const sh = getSheet_(SHEET_KARYAWAN);
+  const rows = getRows_(sh, 10);
+
+  let id = String(data.id || "").trim();
+  const isEdit = Boolean(id);
+  const nama = String(data.nama || "").trim();
+  const barcodeInput = String(data.barcode || "").trim();
+  const pin = String(data.pin || "").trim();
+  const jabatan = String(data.jabatan || "").trim();
+  const shiftDefault = String(data.shiftDefault || "").trim();
+  const status = String(data.status || "Aktif").trim() || "Aktif";
+  const noHp = String(data.noHp || "").trim();
+  const foto = String(data.foto || "").trim();
+  const idToko = String(data.idToko || "").trim();
+
+  if (!nama || !pin || !jabatan || !shiftDefault || !idToko) {
+    return { success: false, message: "Nama, PIN, jabatan, shift, dan toko wajib diisi." };
+  }
+  if (!/^\d{4,8}$/.test(pin)) {
+    return { success: false, message: "PIN harus berupa 4 sampai 8 digit angka." };
+  }
+  if (!getToko_(idToko).success) {
+    return { success: false, message: "Toko yang dipilih tidak ditemukan." };
+  }
+  const shiftValid = listShift_().items.some(item => item.nama.toLowerCase() === shiftDefault.toLowerCase());
+  if (!shiftValid) {
+    return { success: false, message: "Shift default tidak ditemukan." };
+  }
+
+  const rowIndex = isEdit ? rows.findIndex(row => String(row[0] || "").trim() === id) : -1;
+  if (isEdit && rowIndex === -1) {
+    return { success: false, message: "Data karyawan yang akan diedit tidak ditemukan." };
+  }
+
+  const duplicatePin = rows.find((row, index) =>
+    index !== rowIndex && String(row[3] || "").trim() === pin
+  );
+  if (duplicatePin) {
+    return { success: false, message: "PIN sudah digunakan oleh karyawan lain." };
+  }
+
+  if (!id) id = generateKaryawanId_(rows);
+  const barcode = barcodeInput || generateBarcodeKaryawan_(rows, id);
+  const duplicateBarcode = rows.find((row, index) =>
+    index !== rowIndex && String(row[1] || "").trim() === barcode
+  );
+  if (duplicateBarcode) {
+    return { success: false, message: "Barcode sudah digunakan oleh karyawan lain." };
+  }
+
+  const values = [[id, barcode, nama, pin, jabatan, shiftDefault, status, noHp, foto, idToko]];
+  if (isEdit) {
+    sh.getRange(rowIndex + 2, 1, 1, 10).setValues(values);
+    simpanLog_(nama, "Memperbarui karyawan", `${id} | ${idToko} | ${status}`);
+  } else {
+    sh.appendRow(values[0]);
+    simpanLog_(nama, "Menambah karyawan", `${id} | ${idToko}`);
+  }
+
+  return {
+    success: true,
+    message: isEdit ? "Data karyawan berhasil diperbarui." : "Karyawan berhasil ditambahkan.",
+    karyawan: { id, barcode, nama, jabatan, shiftDefault, status, noHp, foto, idToko }
+  };
+}
+
+function setStatusKaryawan_(data) {
+  const id = String(data.id || "").trim();
+  const status = String(data.status || "").trim();
+  if (!id || !["aktif", "nonaktif"].includes(status.toLowerCase())) {
+    return { success: false, message: "ID dan status karyawan tidak valid." };
+  }
+
+  const sh = getSheet_(SHEET_KARYAWAN);
+  const rows = getRows_(sh, 10);
+  const index = rows.findIndex(row => String(row[0] || "").trim() === id);
+  if (index === -1) return { success: false, message: "Karyawan tidak ditemukan." };
+
+  sh.getRange(index + 2, 7).setValue(status);
+  simpanLog_(String(rows[index][2] || ""), "Mengubah status karyawan", `${id} menjadi ${status}`);
+  return { success: true, message: `Status karyawan berhasil diubah menjadi ${status}.` };
+}
+
+function generateKaryawanId_(rows) {
+  let max = 0;
+  rows.forEach(row => {
+    const match = String(row[0] || "").trim().match(/^(?:K|EMP)?(\d+)$/i);
+    if (match) max = Math.max(max, Number(match[1]) || 0);
+  });
+  return `K${String(max + 1).padStart(3, "0")}`;
+}
+
+function generateBarcodeKaryawan_(rows, id) {
+  const used = new Set(rows.map(row => String(row[1] || "").trim()));
+  const baseNumber = Number(String(id || "").replace(/\D/g, "")) || rows.length + 1;
+  let candidate = `89990${String(baseNumber).padStart(5, "0")}`;
+  let counter = baseNumber;
+  while (used.has(candidate)) {
+    counter += 1;
+    candidate = `89990${String(counter).padStart(5, "0")}`;
+  }
+  return candidate;
 }

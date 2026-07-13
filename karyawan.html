@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Karyawan - EMS</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-logo">E</div><div><h2>EMS</h2><small>Employee Management System</small></div></div>
+    <nav>
+      <a href="index.html"><i data-lucide="layout-dashboard"></i>Dashboard</a>
+      <a class="active" href="karyawan.html"><i data-lucide="users"></i>Karyawan</a>
+      <a href="absen.html"><i data-lucide="scan-line"></i>Absensi</a>
+      <a href="shift.html"><i data-lucide="calendar-clock"></i>Jadwal Shift</a>
+      <a href="izin.html"><i data-lucide="file-text"></i>Izin & Cuti</a>
+      <a href="rekap.html"><i data-lucide="bar-chart-3"></i>Rekap Absensi</a>
+      <a href="qr-toko.html"><i data-lucide="qr-code"></i>QR Absensi Toko</a>
+      <a href="pengaturan.html"><i data-lucide="settings"></i>Pengaturan</a>
+    </nav>
+  </aside>
+
+  <main class="main employee-main">
+    <header class="header employee-header">
+      <div><h1>Data Karyawan</h1><p>Kelola identitas, toko, shift, PIN, dan status karyawan</p></div>
+      <button class="employee-primary-button" type="button" onclick="openEmployeeModal()"><i data-lucide="user-plus"></i>Tambah Karyawan</button>
+    </header>
+
+    <section class="employee-summary-grid">
+      <article class="summary-card"><span class="summary-icon purple-summary"><i data-lucide="users"></i></span><div><small>Total Karyawan</small><strong id="summaryTotal">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon green"><i data-lucide="user-check"></i></span><div><small>Aktif</small><strong id="summaryActive">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon red"><i data-lucide="user-x"></i></span><div><small>Nonaktif</small><strong id="summaryInactive">0</strong></div></article>
+    </section>
+
+    <section class="panel employee-filter-panel">
+      <div class="employee-filter-grid">
+        <label><span>Cari Karyawan</span><div class="employee-search-wrap"><i data-lucide="search"></i><input id="filterSearch" type="search" placeholder="Nama, ID, jabatan, nomor HP..." oninput="debouncedLoad()"></div></label>
+        <label><span>Toko</span><select id="filterStore" onchange="loadEmployees()"><option value="">Semua Toko</option></select></label>
+        <label><span>Status</span><select id="filterStatus" onchange="loadEmployees()"><option value="">Semua Status</option><option value="Aktif">Aktif</option><option value="Nonaktif">Nonaktif</option></select></label>
+        <button class="employee-secondary-button" type="button" onclick="resetFilters()"><i data-lucide="rotate-ccw"></i>Reset Filter</button>
+      </div>
+    </section>
+
+    <section class="panel employee-table-panel">
+      <div class="employee-table-heading"><div><h3>Daftar Karyawan</h3><p id="employeeTableInfo">Memuat data...</p></div><button class="employee-icon-button" type="button" onclick="loadEmployees()" title="Perbarui"><i data-lucide="refresh-cw"></i></button></div>
+      <div class="employee-table-scroll">
+        <table class="employee-table">
+          <thead><tr><th>Karyawan</th><th>Toko</th><th>Jabatan</th><th>Shift</th><th>Barcode</th><th>No. HP</th><th>Status</th><th>Aksi</th></tr></thead>
+          <tbody id="employeeTableBody"><tr><td colspan="8" class="employee-empty">Memuat data...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="employeeModal" class="employee-modal" aria-hidden="true">
+    <div class="employee-modal-backdrop" onclick="closeEmployeeModal()"></div>
+    <section class="employee-modal-card" role="dialog" aria-modal="true">
+      <header><div><h2 id="employeeModalTitle">Tambah Karyawan</h2><p>ID dan barcode dapat dibuat otomatis.</p></div><button type="button" class="employee-modal-close" onclick="closeEmployeeModal()"><i data-lucide="x"></i></button></header>
+      <form id="employeeForm" onsubmit="saveEmployee(event)">
+        <input id="employeeId" type="hidden">
+        <div class="employee-form-grid">
+          <label class="employee-span-2"><span>Nama Lengkap *</span><input id="employeeName" required maxlength="100" placeholder="Nama karyawan"></label>
+          <label><span>PIN Absensi *</span><div class="employee-pin-wrap"><input id="employeePin" required inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" placeholder="4–8 digit"><button type="button" onclick="generatePin()">Acak</button></div><small>Harus unik dan hanya angka.</small></label>
+          <label><span>Barcode</span><input id="employeeBarcode" inputmode="numeric" placeholder="Kosongkan untuk otomatis"><small>Tidak dipakai saat absen PIN, tetapi tetap disimpan.</small></label>
+          <label><span>Jabatan *</span><input id="employeePosition" required maxlength="80" placeholder="Contoh: Kasir"></label>
+          <label><span>Nomor HP</span><input id="employeePhone" inputmode="tel" maxlength="25" placeholder="08xxxxxxxxxx"></label>
+          <label><span>Toko *</span><select id="employeeStore" required><option value="">Pilih toko</option></select></label>
+          <label><span>Shift Default *</span><select id="employeeShift" required><option value="">Pilih shift</option></select></label>
+          <label><span>Status *</span><select id="employeeStatus" required><option value="Aktif">Aktif</option><option value="Nonaktif">Nonaktif</option></select></label>
+          <label class="employee-span-2"><span>URL Foto Profil</span><input id="employeePhoto" type="url" placeholder="https://..."><small>Opsional. Fitur upload foto langsung dapat ditambahkan pada tahap berikutnya.</small></label>
+        </div>
+        <footer><button type="button" class="employee-secondary-button" onclick="closeEmployeeModal()">Batal</button><button id="saveEmployeeButton" type="submit" class="employee-primary-button"><i data-lucide="save"></i>Simpan</button></footer>
+      </form>
+    </section>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script>
+    let employees = [], stores = [], shifts = [], searchTimer;
+    const esc = value => String(value ?? "").replace(/[&<>\'\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+    const initials = name => String(name || "?").trim().split(/\s+/).slice(0,2).map(v => v[0] || "").join("").toUpperCase();
+
+    async function requestGet(params) {
+      const url = new URL(EMS_API_URL); Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v ?? ""));
+      const response = await fetch(url); const data = await response.json(); if (!data.success) throw new Error(data.message || "Permintaan gagal."); return data;
+    }
+    async function requestPost(body) {
+      const response = await fetch(EMS_API_URL, { method:"POST", body:JSON.stringify(body) });
+      const data = await response.json(); if (!data.success) throw new Error(data.message || "Permintaan gagal."); return data;
+    }
+    async function loadReferences() {
+      try {
+        const [storeData, shiftData] = await Promise.all([requestGet({action:"listToko"}), requestGet({action:"listShift"})]);
+        stores = storeData.items || []; shifts = shiftData.items || [];
+        const storeOptions = stores.map(x => `<option value="${esc(x.id)}">${esc(x.nama)}</option>`).join("");
+        document.getElementById("filterStore").innerHTML = `<option value="">Semua Toko</option>${storeOptions}`;
+        document.getElementById("employeeStore").innerHTML = `<option value="">Pilih toko</option>${storeOptions}`;
+        document.getElementById("employeeShift").innerHTML = `<option value="">Pilih shift</option>${shifts.map(x => `<option value="${esc(x.nama)}">${esc(x.nama)} (${esc(x.masuk)}–${esc(x.pulang)})</option>`).join("")}`;
+      } catch (error) { Swal.fire("Gagal", error.message, "error"); }
+    }
+    function debouncedLoad() { clearTimeout(searchTimer); searchTimer = setTimeout(loadEmployees, 300); }
+    async function loadEmployees() {
+      const body = document.getElementById("employeeTableBody"); body.innerHTML = `<tr><td colspan="8" class="employee-empty">Memuat data...</td></tr>`;
+      try {
+        const data = await requestGet({ action:"listKaryawanAdmin", idToko:filterStore.value, status:filterStatus.value, cari:filterSearch.value.trim() });
+        employees = data.items || []; summaryTotal.textContent=data.summary.total||0; summaryActive.textContent=data.summary.aktif||0; summaryInactive.textContent=data.summary.nonaktif||0;
+        employeeTableInfo.textContent = `${employees.length} karyawan ditemukan`; renderEmployees();
+      } catch (error) { body.innerHTML = `<tr><td colspan="8" class="employee-empty error">${esc(error.message)}</td></tr>`; }
+    }
+    function renderEmployees() {
+      const body = document.getElementById("employeeTableBody");
+      if (!employees.length) { body.innerHTML=`<tr><td colspan="8" class="employee-empty"><i data-lucide="users"></i><b>Data karyawan tidak ditemukan</b><span>Ubah filter atau tambah karyawan baru.</span></td></tr>`; lucide.createIcons(); return; }
+      body.innerHTML = employees.map(item => {
+        const active = String(item.status).toLowerCase()==="aktif";
+        return `<tr><td><div class="employee-person">${item.foto?`<img src="${esc(item.foto)}" alt="">`:`<span>${esc(initials(item.nama))}</span>`}<div><b>${esc(item.nama)}</b><small>${esc(item.id)}</small></div></div></td><td>${esc(item.namaToko)}</td><td>${esc(item.jabatan||"-")}</td><td>${esc(item.shiftDefault||"-")}</td><td><code>${esc(item.barcode||"-")}</code></td><td>${esc(item.noHp||"-")}</td><td><span class="employee-status ${active?"active":"inactive"}">${esc(item.status||"-")}</span></td><td><div class="employee-actions"><button type="button" onclick="editEmployee('${esc(item.id)}')" title="Edit"><i data-lucide="pencil"></i></button><button type="button" onclick="toggleEmployeeStatus('${esc(item.id)}','${active?"Nonaktif":"Aktif"}')" title="${active?"Nonaktifkan":"Aktifkan"}" class="${active?"danger":"success"}"><i data-lucide="${active?"user-x":"user-check"}"></i></button></div></td></tr>`;
+      }).join(""); lucide.createIcons();
+    }
+    function openEmployeeModal(item=null) {
+      employeeForm.reset(); employeeId.value=item?.id||""; employeeName.value=item?.nama||""; employeePin.value=item?.pin||""; employeeBarcode.value=item?.barcode||""; employeePosition.value=item?.jabatan||""; employeePhone.value=item?.noHp||""; employeeStore.value=item?.idToko||""; employeeShift.value=item?.shiftDefault||""; employeeStatus.value=item?.status||"Aktif"; employeePhoto.value=item?.foto||"";
+      employeeModalTitle.textContent=item?"Edit Karyawan":"Tambah Karyawan"; employeeModal.classList.add("open"); employeeModal.setAttribute("aria-hidden","false"); document.body.classList.add("modal-open"); setTimeout(()=>employeeName.focus(),100); lucide.createIcons();
+    }
+    function closeEmployeeModal(){ employeeModal.classList.remove("open"); employeeModal.setAttribute("aria-hidden","true"); document.body.classList.remove("modal-open"); }
+    function editEmployee(id){ const item=employees.find(x=>x.id===id); if(item) openEmployeeModal(item); }
+    function generatePin(){ employeePin.value=String(Math.floor(1000+Math.random()*9000)); }
+    async function saveEmployee(event){
+      event.preventDefault(); saveEmployeeButton.disabled=true; saveEmployeeButton.classList.add("loading");
+      try { const data=await requestPost({action:"saveKaryawan",id:employeeId.value,nama:employeeName.value.trim(),pin:employeePin.value.trim(),barcode:employeeBarcode.value.trim(),jabatan:employeePosition.value.trim(),noHp:employeePhone.value.trim(),idToko:employeeStore.value,shiftDefault:employeeShift.value,status:employeeStatus.value,foto:employeePhoto.value.trim()}); closeEmployeeModal(); await Swal.fire({icon:"success",title:"Berhasil",text:data.message,timer:1600,showConfirmButton:false}); await loadEmployees(); }
+      catch(error){ Swal.fire("Gagal",error.message,"error"); }
+      finally{ saveEmployeeButton.disabled=false; saveEmployeeButton.classList.remove("loading"); }
+    }
+    async function toggleEmployeeStatus(id,status){
+      const item=employees.find(x=>x.id===id); const result=await Swal.fire({icon:"question",title:`${status}kan karyawan?`,text:`Status ${item?.nama||id} akan diubah menjadi ${status}.`,showCancelButton:true,confirmButtonText:"Ya, lanjutkan",cancelButtonText:"Batal"}); if(!result.isConfirmed)return;
+      try{ const data=await requestPost({action:"setStatusKaryawan",id,status}); await Swal.fire({icon:"success",title:"Berhasil",text:data.message,timer:1400,showConfirmButton:false}); loadEmployees(); }catch(error){Swal.fire("Gagal",error.message,"error");}
+    }
+    function resetFilters(){ filterSearch.value="";filterStore.value="";filterStatus.value="";loadEmployees(); }
+    document.addEventListener("keydown",e=>{if(e.key==="Escape")closeEmployeeModal();});
+    document.addEventListener("DOMContentLoaded",async()=>{lucide.createIcons();await loadReferences();await loadEmployees();});
+  </script>
+</body>
+</html>
