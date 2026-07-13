@@ -8,6 +8,7 @@ const SHEET_LOG = "Log";
 const SHEET_PENGATURAN = "Pengaturan";
 const SHEET_PENGUMUMAN = "Pengumuman";
 const SHEET_PAYROLL = "Payroll";
+const SHEET_ADMIN = "Admin";
 
 function doGet(e) {
   ensureSystemSchema_();
@@ -24,7 +25,7 @@ function doGet(e) {
   const adminGetActions = [
     "listKaryawanAdmin", "getDashboard", "getRiwayatAbsensiAdmin",
     "getJadwalAdmin", "listIzinAdmin", "listPengumuman",
-    "getPayrollAdmin", "getPengaturanAdmin", "getSystemHealth"
+    "getPayrollAdmin", "getPengaturanAdmin", "getSystemHealth", "listAdminAccounts"
   ];
   if (adminGetActions.indexOf(action) !== -1) {
     const auth = requireAdmin_(e.parameter.adminToken);
@@ -143,6 +144,10 @@ function doGet(e) {
     return json(getSystemHealth_());
   }
 
+  if (action === "listAdminAccounts") {
+    return json(listAdminAccounts_(e.parameter.adminToken));
+  }
+
   // Portal Karyawan V7 - endpoint tambahan, tidak mengganti endpoint lama.
   if (action === "getPortalHome") {
     return json(getPortalHome_(e.parameter.token));
@@ -201,7 +206,7 @@ function doPost(e) {
     "saveKaryawan", "setStatusKaryawan", "saveJadwalBatch",
     "updateStatusIzin", "savePengumuman", "deletePengumuman",
     "savePayrollBatch", "savePengaturanAdmin", "testWhatsApp",
-    "notifyPayroll", "sendPayrollEmail"
+    "notifyPayroll", "sendPayrollEmail", "saveAdminAccount"
   ];
   if (adminPostActions.indexOf(action) !== -1) {
     const auth = requireAdmin_(data.adminToken);
@@ -272,6 +277,10 @@ function doPost(e) {
 
   if (action === "notifyPayroll") {
     return json(notifyPayroll_(data));
+  }
+
+  if (action === "saveAdminAccount") {
+    return json(saveAdminAccount_(data));
   }
 
   return json({
@@ -2193,42 +2202,114 @@ const ADMIN_SESSION_HOURS = 12;
 
 function adminProps_(){ return PropertiesService.getScriptProperties(); }
 function adminHash_(value){
-  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(value),Utilities.Charset.UTF_8)).replace(/=+$/g,"");
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(value||""))).replace(/=+$/g,"");
 }
 function getAdminSecret_(){
   const p=adminProps_(); let s=p.getProperty("EMS_ADMIN_SECRET");
   if(!s){s=Utilities.getUuid()+Utilities.getUuid();p.setProperty("EMS_ADMIN_SECRET",s);} return s;
 }
+function getAdminSheet_(){
+  return ensureSheetHeader_(SHEET_ADMIN,["Username","Password Hash","Salt","Nama","Role","Status","Version","Dibuat Pada","Login Terakhir"]);
+}
+function migrateLegacyAdmin_(){
+  const sh=getAdminSheet_();
+  const rows=getRows_(sh,9);
+  if(rows.some(r=>String(r[0]||"").trim())) return;
+  const p=adminProps_();
+  const username=String(p.getProperty("EMS_ADMIN_USERNAME")||"").trim();
+  if(!username) return;
+  sh.appendRow([username,p.getProperty("EMS_ADMIN_PASSWORD_HASH")||"",p.getProperty("EMS_ADMIN_SALT")||"",username,"Owner","Aktif",1,new Date(),""]);
+}
+function adminRows_(){ migrateLegacyAdmin_(); return getRows_(getAdminSheet_(),9); }
+function findAdmin_(username){
+  const key=String(username||"").trim().toLowerCase();
+  const rows=adminRows_();
+  const index=rows.findIndex(r=>String(r[0]||"").trim().toLowerCase()===key);
+  if(index<0)return null;
+  const r=rows[index];
+  return {row:index+2,username:String(r[0]||"").trim(),hash:String(r[1]||""),salt:String(r[2]||""),nama:String(r[3]||r[0]||"").trim(),role:String(r[4]||"Admin").trim(),status:String(r[5]||"Aktif").trim(),version:Number(r[6])||1,dibuatPada:r[7],loginTerakhir:r[8]};
+}
 function getAdminSetupStatus_(){
-  return {success:true,configured:Boolean(adminProps_().getProperty("EMS_ADMIN_USERNAME"))};
+  return {success:true,configured:adminRows_().some(r=>String(r[0]||"").trim()&&String(r[5]||"Aktif").toLowerCase()==="aktif")};
 }
 function setupAdmin_(data){
-  const p=adminProps_();
-  if(p.getProperty("EMS_ADMIN_USERNAME")) return {success:false,message:"Akun admin sudah dikonfigurasi."};
+  if(getAdminSetupStatus_().configured)return{success:false,message:"Akun admin sudah dikonfigurasi."};
   const username=String(data.username||"").trim(); const password=String(data.password||"");
   if(username.length<4)return{success:false,message:"Username minimal 4 karakter."};
   if(password.length<8)return{success:false,message:"Password minimal 8 karakter."};
   const salt=Utilities.getUuid();
-  p.setProperties({EMS_ADMIN_USERNAME:username,EMS_ADMIN_SALT:salt,EMS_ADMIN_PASSWORD_HASH:adminHash_(salt+":"+password)});
-  simpanLog_(username,"Membuat akun admin","Konfigurasi keamanan admin pertama");
+  getAdminSheet_().appendRow([username,adminHash_(salt+":"+password),salt,username,"Owner","Aktif",1,new Date(),""]);
+  simpanLog_(username,"Membuat akun admin","Akun Owner pertama");
   return loginAdmin_({username,password});
 }
-function loginAdmin_(data){
-  const p=adminProps_(); const username=String(data.username||"").trim(); const password=String(data.password||"");
-  const saved=p.getProperty("EMS_ADMIN_USERNAME")||""; const salt=p.getProperty("EMS_ADMIN_SALT")||""; const hash=p.getProperty("EMS_ADMIN_PASSWORD_HASH")||"";
-  if(!saved)return{success:false,setupRequired:true,message:"Akun admin belum dibuat."};
-  if(username!==saved||adminHash_(salt+":"+password)!==hash){simpanLog_(username,"Login admin gagal","Username atau password salah");return{success:false,message:"Username atau password salah."};}
-  const payload={username:saved,exp:Date.now()+ADMIN_SESSION_HOURS*3600000,nonce:Utilities.getUuid()};
-  const body=base64UrlEncode_(JSON.stringify(payload));
+function makeAdminToken_(admin){
+  const payload={username:admin.username,role:admin.role,version:admin.version,iat:Date.now()};
+  const body=Utilities.base64EncodeWebSafe(JSON.stringify(payload)).replace(/=+$/g,"");
   const sig=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(body,getAdminSecret_())).replace(/=+$/g,"");
-  simpanLog_(saved,"Login admin","Berhasil");
-  return{success:true,token:body+"."+sig,expiresInHours:ADMIN_SESSION_HOURS,username:saved};
+  return body+"."+sig;
+}
+function loginAdmin_(data){
+  const username=String(data.username||"").trim(); const password=String(data.password||"");
+  const admin=findAdmin_(username);
+  if(!admin)return{success:false,setupRequired:!getAdminSetupStatus_().configured,message:"Username atau password salah."};
+  if(admin.status.toLowerCase()!=="aktif")return{success:false,message:"Akun admin sedang nonaktif."};
+  if(adminHash_(admin.salt+":"+password)!==admin.hash){simpanLog_(username,"Login admin gagal","Username atau password salah");return{success:false,message:"Username atau password salah."};}
+  getAdminSheet_().getRange(admin.row,9).setValue(new Date());
+  simpanLog_(admin.username,"Login admin","Berhasil");
+  return{success:true,token:makeAdminToken_(admin),username:admin.username,nama:admin.nama,role:admin.role,persistent:true};
 }
 function verifyAdminToken_(token){
-  try{const parts=String(token||"").split(".");if(parts.length!==2)return null;const expected=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(parts[0],getAdminSecret_())).replace(/=+$/g,"");if(expected!==parts[1])return null;const payload=JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());if(!payload.username||Number(payload.exp)<Date.now())return null;if(payload.username!==(adminProps_().getProperty("EMS_ADMIN_USERNAME")||""))return null;return payload;}catch(e){return null;}
+  try{
+    const parts=String(token||"").split(".");if(parts.length!==2)return null;
+    const expected=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(parts[0],getAdminSecret_())).replace(/=+$/g,"");
+    if(expected!==parts[1])return null;
+    const payload=JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+    if(!payload.username)return null;
+    const admin=findAdmin_(payload.username);
+    if(!admin||admin.status.toLowerCase()!=="aktif")return null;
+    if((Number(payload.version)||1)!==admin.version)return null;
+    return {username:admin.username,nama:admin.nama,role:admin.role,version:admin.version};
+  }catch(e){return null;}
 }
-function requireAdmin_(token){const admin=verifyAdminToken_(token);return admin?{success:true,admin}:{success:false,sessionExpired:true,message:"Sesi admin tidak valid atau sudah berakhir. Silakan login kembali."};}
-function validateAdminSession_(token){const r=requireAdmin_(token);return r.success?{success:true,username:r.admin.username}:r;}
+function requireAdmin_(token){const admin=verifyAdminToken_(token);return admin?{success:true,admin}:{success:false,sessionExpired:true,message:"Sesi admin tidak valid. Silakan login kembali."};}
+function validateAdminSession_(token){const r=requireAdmin_(token);return r.success?{success:true,username:r.admin.username,nama:r.admin.nama,role:r.admin.role}:r;}
+function listAdminAccounts_(token){
+  const auth=requireAdmin_(token); if(!auth.success)return auth;
+  if(auth.admin.role.toLowerCase()!=="owner")return{success:false,message:"Hanya Owner yang dapat mengelola akun admin."};
+  const items=adminRows_().filter(r=>String(r[0]||"").trim()).map(r=>({username:String(r[0]||""),nama:String(r[3]||r[0]||""),role:String(r[4]||"Admin"),status:String(r[5]||"Aktif"),dibuatPada:r[7]?formatDateTime_(r[7]):"",loginTerakhir:r[8]?formatDateTime_(r[8]):""}));
+  return{success:true,items,currentUser:auth.admin.username};
+}
+function saveAdminAccount_(data){
+  const auth=requireAdmin_(data.adminToken); if(!auth.success)return auth;
+  if(auth.admin.role.toLowerCase()!=="owner")return{success:false,message:"Hanya Owner yang dapat mengelola akun admin."};
+  const original=String(data.originalUsername||"").trim();
+  const username=String(data.username||"").trim();
+  const nama=String(data.nama||username).trim();
+  const role=["Owner","Admin","Supervisor"].includes(String(data.role||""))?String(data.role):"Admin";
+  const status=String(data.status||"Aktif")==="Nonaktif"?"Nonaktif":"Aktif";
+  const password=String(data.password||"");
+  if(username.length<4)return{success:false,message:"Username minimal 4 karakter."};
+  const existing=findAdmin_(original||username);
+  const duplicate=findAdmin_(username);
+  if(duplicate&&(!existing||duplicate.row!==existing.row))return{success:false,message:"Username sudah digunakan."};
+  const sh=getAdminSheet_();
+  if(!existing){
+    if(password.length<8)return{success:false,message:"Password akun baru minimal 8 karakter."};
+    const salt=Utilities.getUuid();
+    sh.appendRow([username,adminHash_(salt+":"+password),salt,nama,role,status,1,new Date(),""]);
+    simpanLog_(auth.admin.username,"Menambah akun admin",username+" | "+role);
+    return{success:true,message:"Akun admin berhasil ditambahkan."};
+  }
+  const rows=adminRows_();
+  const activeOwners=rows.filter(r=>String(r[4]||"").toLowerCase()==="owner"&&String(r[5]||"Aktif").toLowerCase()==="aktif").length;
+  if(existing.role.toLowerCase()==="owner"&&existing.status.toLowerCase()==="aktif"&&(role.toLowerCase()!=="owner"||status.toLowerCase()!=="aktif")&&activeOwners<=1)return{success:false,message:"Minimal harus ada satu akun Owner aktif."};
+  let hash=existing.hash,salt=existing.salt,version=existing.version;
+  if(password){if(password.length<8)return{success:false,message:"Password minimal 8 karakter."};salt=Utilities.getUuid();hash=adminHash_(salt+":"+password);version+=1;}
+  if(status.toLowerCase()!==existing.status.toLowerCase())version+=1;
+  sh.getRange(existing.row,1,1,7).setValues([[username,hash,salt,nama,role,status,version]]);
+  simpanLog_(auth.admin.username,"Memperbarui akun admin",username+" | "+role+" | "+status);
+  return{success:true,message:"Akun admin berhasil diperbarui.",currentSessionInvalidated:existing.username===auth.admin.username&&(password||status!==existing.status)};
+}
 
 // ============================================================
 // EMAIL SLIP GAJI V9
@@ -2271,20 +2352,22 @@ function sendPayrollEmail_(data){
 // ============================================================
 function ensureSystemSchema_() {
   const cache = CacheService.getScriptCache();
-  if (cache.get("EMS_SCHEMA_V91_OK") === "1") return;
+  if (cache.get("EMS_SCHEMA_V10_OK") === "1") return;
 
   const lock = LockService.getScriptLock();
   try {
     lock.tryLock(5000);
-    if (cache.get("EMS_SCHEMA_V91_OK") === "1") return;
+    if (cache.get("EMS_SCHEMA_V10_OK") === "1") return;
 
     ensureKaryawanEmailColumn_();
     ensureSheetHeader_(SHEET_PAYROLL, ["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
     ensureSheetHeader_(SHEET_PENGUMUMAN, ["ID","Judul","Isi","Target Toko","Tanggal Mulai","Tanggal Selesai","Status","Dibuat Pada"]);
     ensureSheetHeader_(SHEET_IZIN, ["Tanggal","ID Karyawan","Nama","ID Toko","Jenis","Alasan","Status","Tanggal Selesai","Bukti","Catatan Admin","Diproses Pada"]);
     ensureSheetHeader_(SHEET_LOG, ["Waktu","User","Aktivitas","Keterangan"]);
+    ensureSheetHeader_(SHEET_ADMIN, ["Username","Password Hash","Salt","Nama","Role","Status","Version","Dibuat Pada","Login Terakhir"]);
+    migrateLegacyAdmin_();
 
-    cache.put("EMS_SCHEMA_V91_OK", "1", 300);
+    cache.put("EMS_SCHEMA_V10_OK", "1", 300);
   } catch (error) {
     console.error("Migrasi schema V9.1 dilewati:", error);
   } finally {
@@ -2322,7 +2405,7 @@ function getSystemHealth_() {
   const required = [
     SHEET_TOKO, SHEET_KARYAWAN, SHEET_SHIFT, SHEET_JADWAL,
     SHEET_ABSENSI, SHEET_IZIN, SHEET_LOG, SHEET_PENGATURAN,
-    SHEET_PENGUMUMAN, SHEET_PAYROLL
+    SHEET_PENGUMUMAN, SHEET_PAYROLL, SHEET_ADMIN
   ];
 
   const sheets = required.map(name => {
@@ -2340,9 +2423,9 @@ function getSystemHealth_() {
 
   return {
     success: true,
-    version: "9.1",
+    version: "10.0",
     timezone: Session.getScriptTimeZone(),
-    adminConfigured: Boolean(adminProps_().getProperty("EMS_ADMIN_USERNAME")),
+    adminConfigured: getAdminSetupStatus_().configured,
     emailQuota,
     sheets,
     checkedAt: new Date().toISOString()
