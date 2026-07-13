@@ -6,6 +6,8 @@ const SHEET_ABSENSI = "Absensi";
 const SHEET_IZIN = "Izin";
 const SHEET_LOG = "Log";
 const SHEET_PENGATURAN = "Pengaturan";
+const SHEET_PENGUMUMAN = "Pengumuman";
+const SHEET_PAYROLL = "Payroll";
 
 function doGet(e) {
   const action = String(e.parameter.action || "").trim();
@@ -91,6 +93,32 @@ function doGet(e) {
     }));
   }
 
+  if (action === "listIzinAdmin") {
+    return json(listIzinAdmin_({
+      idToko: e.parameter.idToko,
+      status: e.parameter.status,
+      tanggalMulai: e.parameter.tanggalMulai,
+      tanggalAkhir: e.parameter.tanggalAkhir,
+      cari: e.parameter.cari
+    }));
+  }
+
+  if (action === "listPengumuman") {
+    return json(listPengumuman_({ aktifSaja: e.parameter.aktifSaja }));
+  }
+
+  if (action === "getPayrollAdmin") {
+    return json(getPayrollAdmin_({
+      bulan: e.parameter.bulan,
+      tahun: e.parameter.tahun,
+      idToko: e.parameter.idToko
+    }));
+  }
+
+  if (action === "getPengaturanAdmin") {
+    return json(getPengaturanAdmin_());
+  }
+
   return json({
     success: true,
     message: "EMS API aktif"
@@ -129,6 +157,30 @@ function doPost(e) {
 
   if (action === "saveJadwalBatch") {
     return json(saveJadwalBatch_(data));
+  }
+
+  if (action === "updateStatusIzin") {
+    return json(updateStatusIzin_(data));
+  }
+
+  if (action === "savePengumuman") {
+    return json(savePengumuman_(data));
+  }
+
+  if (action === "deletePengumuman") {
+    return json(deletePengumuman_(data));
+  }
+
+  if (action === "savePayrollBatch") {
+    return json(savePayrollBatch_(data));
+  }
+
+  if (action === "savePengaturanAdmin") {
+    return json(savePengaturanAdmin_(data));
+  }
+
+  if (action === "testWhatsApp") {
+    return json(testWhatsApp_(data));
   }
 
   return json({
@@ -1617,3 +1669,146 @@ function saveJadwalBatch_(data) {
     summary: { diperbarui: updates.length, ditambahkan: appends.length, dihapus: deleteRows.length }
   };
 }
+
+
+// ============================================================
+// MODUL IZIN & CUTI ADMIN
+// Kolom lama 1-7 dipertahankan. Kolom 8-10 hanya tambahan:
+// Diproses Pada | Diproses Oleh | Catatan Admin
+// ============================================================
+function listIzinAdmin_(filter) {
+  const sh = getSheet_(SHEET_IZIN);
+  const rows = getRows_(sh, Math.max(10, sh.getLastColumn()));
+  const mulai = parseTanggal_(filter.tanggalMulai);
+  const akhir = parseTanggal_(filter.tanggalAkhir);
+  const cari = String(filter.cari || "").trim().toLowerCase();
+  const status = String(filter.status || "").trim().toLowerCase();
+  const idToko = String(filter.idToko || "").trim();
+
+  const items = rows.map((r, i) => ({
+    row: i + 2,
+    tanggal: normalizeDate_(r[0]),
+    idKaryawan: String(r[1] || "").trim(),
+    nama: String(r[2] || "").trim(),
+    idToko: String(r[3] || "").trim(),
+    jenis: String(r[4] || "").trim(),
+    alasan: String(r[5] || "").trim(),
+    status: String(r[6] || "Menunggu").trim(),
+    diprosesPada: r[7] ? formatDateTime_(r[7]) : "",
+    diprosesOleh: String(r[8] || "").trim(),
+    catatanAdmin: String(r[9] || "").trim()
+  })).filter(x => {
+    const d = parseTanggal_(x.tanggal);
+    return (!idToko || x.idToko === idToko) &&
+      (!status || x.status.toLowerCase() === status) &&
+      (!mulai || d >= startOfDay_(mulai)) &&
+      (!akhir || d <= endOfDay_(akhir)) &&
+      (!cari || `${x.nama} ${x.idKaryawan} ${x.jenis} ${x.alasan}`.toLowerCase().includes(cari));
+  }).reverse();
+
+  return { success: true, items, summary: {
+    total: items.length,
+    menunggu: items.filter(x => x.status.toLowerCase() === "menunggu").length,
+    disetujui: items.filter(x => x.status.toLowerCase() === "disetujui").length,
+    ditolak: items.filter(x => x.status.toLowerCase() === "ditolak").length
+  }};
+}
+
+function updateStatusIzin_(data) {
+  const row = Number(data.row);
+  const status = String(data.status || "").trim();
+  if (!Number.isInteger(row) || row < 2) return {success:false,message:"Baris izin tidak valid."};
+  if (!["Menunggu","Disetujui","Ditolak"].includes(status)) return {success:false,message:"Status izin tidak valid."};
+  const sh = getSheet_(SHEET_IZIN);
+  if (row > sh.getLastRow()) return {success:false,message:"Data izin tidak ditemukan."};
+  sh.getRange(row, 7, 1, 4).setValues([[
+    status,
+    new Date(),
+    String(data.diprosesOleh || "Admin").trim(),
+    String(data.catatanAdmin || "").trim()
+  ]]);
+  const id = String(sh.getRange(row,2).getValue() || "").trim();
+  const nama = String(sh.getRange(row,3).getValue() || "").trim();
+  const jenis = String(sh.getRange(row,5).getValue() || "").trim();
+  const k = getKaryawanById_(id);
+  let wa = null;
+  if (data.kirimWA !== false && k && k.noHp) {
+    wa = kirimNotifikasiIzin_(k.noHp, nama, jenis, status, String(data.catatanAdmin || ""));
+  }
+  simpanLog_(String(data.diprosesOleh || "Admin"), `Izin ${status}`, `${nama} | ${jenis}`);
+  return {success:true,message:`Izin berhasil ${status.toLowerCase()}.`,whatsapp:wa};
+}
+
+// ============================================================
+// MODUL PENGUMUMAN
+// ============================================================
+function listPengumuman_(filter) {
+  const sh = getOrCreateDataSheet_(SHEET_PENGUMUMAN,["ID","Judul","Isi","Target Toko","Tanggal Mulai","Tanggal Selesai","Aktif","Dibuat Pada","Dibuat Oleh"]);
+  const rows = getRows_(sh,9);
+  const now = todayDate_();
+  let items = rows.map((r,i)=>({
+    row:i+2,id:String(r[0]||""),judul:String(r[1]||""),isi:String(r[2]||""),idToko:String(r[3]||""),
+    tanggalMulai:normalizeDate_(r[4]),tanggalSelesai:normalizeDate_(r[5]),aktif:String(r[6]||"Ya"),
+    dibuatPada:formatDateTime_(r[7]),dibuatOleh:String(r[8]||"")
+  }));
+  if (String(filter.aktifSaja||"") === "1") items=items.filter(x=>x.aktif.toLowerCase()!=="tidak" && (!x.tanggalMulai||parseTanggal_(x.tanggalMulai)<=now) && (!x.tanggalSelesai||parseTanggal_(x.tanggalSelesai)>=now));
+  return {success:true,items:items.reverse()};
+}
+function savePengumuman_(data){
+  const sh=getOrCreateDataSheet_(SHEET_PENGUMUMAN,["ID","Judul","Isi","Target Toko","Tanggal Mulai","Tanggal Selesai","Aktif","Dibuat Pada","Dibuat Oleh"]);
+  const id=String(data.id||`PGM-${Date.now()}`); const judul=String(data.judul||"").trim(); const isi=String(data.isi||"").trim();
+  if(!judul||!isi)return{success:false,message:"Judul dan isi pengumuman wajib diisi."};
+  const row=[id,judul,isi,String(data.idToko||""),parseTanggal_(data.tanggalMulai)||todayDate_(),parseTanggal_(data.tanggalSelesai)||"",String(data.aktif||"Ya"),new Date(),String(data.dibuatOleh||"Admin")];
+  const rows=getRows_(sh,9); const idx=rows.findIndex(r=>String(r[0])===id);
+  if(idx>=0) sh.getRange(idx+2,1,1,9).setValues([row]); else sh.appendRow(row);
+  return{success:true,message:"Pengumuman berhasil disimpan.",id};
+}
+function deletePengumuman_(data){
+  const sh=getOrCreateDataSheet_(SHEET_PENGUMUMAN,["ID","Judul","Isi","Target Toko","Tanggal Mulai","Tanggal Selesai","Aktif","Dibuat Pada","Dibuat Oleh"]);
+  const id=String(data.id||""); const rows=getRows_(sh,9); const idx=rows.findIndex(r=>String(r[0])===id);
+  if(idx<0)return{success:false,message:"Pengumuman tidak ditemukan."}; sh.deleteRow(idx+2); return{success:true,message:"Pengumuman dihapus."};
+}
+
+// ============================================================
+// MODUL PAYROLL DASAR
+// Sheet Payroll: Periode | ID | Nama | Toko | Hadir | Terlambat | Durasi | Gaji Pokok | Tunjangan | Potongan | Gaji Bersih | Status | Catatan | Disimpan Pada
+// ============================================================
+function getPayrollAdmin_(filter){
+  const bulan=Number(filter.bulan)||todayDate_().getMonth()+1, tahun=Number(filter.tahun)||todayDate_().getFullYear();
+  const periode=`${tahun}-${String(bulan).padStart(2,"0")}`; const idToko=String(filter.idToko||"");
+  const karyawan=getRows_(getSheet_(SHEET_KARYAWAN),10).filter(r=>String(r[6]||"").toLowerCase()==="aktif"&&(!idToko||String(r[9]||"")===idToko));
+  const abs=getRows_(getSheet_(SHEET_ABSENSI),15).filter(r=>{const d=new Date(r[0]);return !isNaN(d)&&d.getMonth()+1===bulan&&d.getFullYear()===tahun;});
+  const sh=getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
+  const saved=getRows_(sh,14).filter(r=>String(r[0])===periode); const smap={}; saved.forEach(r=>smap[String(r[1])]=r);
+  const items=karyawan.map(k=>{const id=String(k[0]); const a=abs.filter(r=>String(r[1])===id); const s=smap[id]||[]; const pokok=Number(s[7])||0,tunj=Number(s[8])||0,pot=Number(s[9])||0; return{
+    periode,idKaryawan:id,nama:String(k[2]||""),idToko:String(k[9]||""),hadir:a.length,terlambat:a.filter(r=>String(r[9]||"").toLowerCase().includes("terlambat")).length,
+    totalDurasi:a.reduce((n,r)=>n+parseDurasiMenit_(r[14]),0),gajiPokok:pokok,tunjangan:tunj,potongan:pot,gajiBersih:pokok+tunj-pot,status:String(s[11]||"Draft"),catatan:String(s[12]||"")};});
+  return{success:true,periode,items,summary:{jumlahKaryawan:items.length,totalGaji:items.reduce((n,x)=>n+x.gajiBersih,0),sudahDibayar:items.filter(x=>x.status==="Dibayar").length}};
+}
+function savePayrollBatch_(data){
+  const items=Array.isArray(data.items)?data.items:[]; if(!items.length)return{success:false,message:"Tidak ada data payroll untuk disimpan."};
+  const sh=getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
+  const existing=getRows_(sh,14); items.forEach(x=>{const row=[x.periode,x.idKaryawan,x.nama,x.idToko,Number(x.hadir)||0,Number(x.terlambat)||0,Number(x.totalDurasi)||0,Number(x.gajiPokok)||0,Number(x.tunjangan)||0,Number(x.potongan)||0,(Number(x.gajiPokok)||0)+(Number(x.tunjangan)||0)-(Number(x.potongan)||0),String(x.status||"Draft"),String(x.catatan||""),new Date()]; const idx=existing.findIndex(r=>String(r[0])===String(x.periode)&&String(r[1])===String(x.idKaryawan)); if(idx>=0)sh.getRange(idx+2,1,1,14).setValues([row]);else sh.appendRow(row);});
+  return{success:true,message:`${items.length} data payroll berhasil disimpan.`};
+}
+
+// ============================================================
+// PENGATURAN & WHATSAPP
+// Pengiriman otomatis memakai WhatsApp Cloud API milik Meta.
+// ============================================================
+function getPengaturanAdmin_(){const map=getPengaturanMap_(); return{success:true,settings:{WA_MODE:map.WA_MODE||"MANUAL",WA_PHONE_NUMBER_ID:map.WA_PHONE_NUMBER_ID||"",WA_GRAPH_VERSION:map.WA_GRAPH_VERSION||"v23.0",WA_TEMPLATE_IZIN:map.WA_TEMPLATE_IZIN||"",WA_TEMPLATE_LANGUAGE:map.WA_TEMPLATE_LANGUAGE||"id",WA_ACCESS_TOKEN:map.WA_ACCESS_TOKEN?"••••••••":""}};}
+function savePengaturanAdmin_(data){const allowed=["WA_MODE","WA_PHONE_NUMBER_ID","WA_GRAPH_VERSION","WA_TEMPLATE_IZIN","WA_TEMPLATE_LANGUAGE","WA_ACCESS_TOKEN"]; const current=getPengaturanMap_(); allowed.forEach(k=>{if(data.settings&&Object.prototype.hasOwnProperty.call(data.settings,k)){const v=String(data.settings[k]??"").trim(); if(k!=="WA_ACCESS_TOKEN"||v&&v!=="••••••••") current[k]=v;}}); writePengaturanMap_(current); return{success:true,message:"Pengaturan berhasil disimpan."};}
+function testWhatsApp_(data){const no=String(data.noHp||"").trim(); if(!no)return{success:false,message:"Nomor WhatsApp wajib diisi."}; return kirimWhatsApp_(no,"Tes notifikasi EMS berhasil. Sistem WhatsApp sudah terhubung.",null,[]);}
+function kirimNotifikasiIzin_(no,nama,jenis,status,catatan){const msg=`Halo ${nama}, pengajuan ${jenis} Anda berstatus *${status}*.${catatan?` Catatan: ${catatan}`:""}`; const p=getPengaturanMap_(); const template=String(p.WA_TEMPLATE_IZIN||"").trim(); return kirimWhatsApp_(no,msg,template,[nama,jenis,status,catatan||"-"]);}
+function kirimWhatsApp_(noHp,text,templateName,params){const p=getPengaturanMap_(); const mode=String(p.WA_MODE||"MANUAL").toUpperCase(); const no=normalizePhone_(noHp); const manualUrl=`https://wa.me/${no}?text=${encodeURIComponent(text)}`; if(mode!=="CLOUD_API")return{success:true,mode:"MANUAL",manualUrl,message:"Tautan WhatsApp manual tersedia."};
+  const token=String(p.WA_ACCESS_TOKEN||"").trim(), phoneId=String(p.WA_PHONE_NUMBER_ID||"").trim(), version=String(p.WA_GRAPH_VERSION||"v23.0").trim(); if(!token||!phoneId)return{success:false,mode:"CLOUD_API",manualUrl,message:"Token atau Phone Number ID WhatsApp belum diisi."};
+  let payload={messaging_product:"whatsapp",to:no,type:"text",text:{body:text}}; if(templateName){payload={messaging_product:"whatsapp",to:no,type:"template",template:{name:templateName,language:{code:String(p.WA_TEMPLATE_LANGUAGE||"id")},components:[{type:"body",parameters:(params||[]).map(v=>({type:"text",text:String(v)}))}]}};}
+  try{const res=UrlFetchApp.fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`,{method:"post",contentType:"application/json",headers:{Authorization:`Bearer ${token}`},payload:JSON.stringify(payload),muteHttpExceptions:true}); const obj=JSON.parse(res.getContentText()||"{}"); if(res.getResponseCode()>=200&&res.getResponseCode()<300)return{success:true,mode:"CLOUD_API",message:"Notifikasi WhatsApp berhasil dikirim.",response:obj}; return{success:false,mode:"CLOUD_API",manualUrl,message:(obj.error&&obj.error.message)||"WhatsApp API menolak pesan.",response:obj};}catch(e){return{success:false,mode:"CLOUD_API",manualUrl,message:e.message};}}
+
+function normalizePhone_(value){let s=String(value||"").replace(/\D/g,""); if(s.startsWith("0"))s="62"+s.slice(1); return s;}
+function writePengaturanMap_(map){const sh=getSheet_(SHEET_PENGATURAN); const keys=Object.keys(map); if(sh.getLastRow()>1)sh.getRange(2,1,sh.getLastRow()-1,Math.max(2,sh.getLastColumn())).clearContent(); if(keys.length)sh.getRange(2,1,keys.length,2).setValues(keys.map(k=>[k,map[k]]));}
+function getOrCreateDataSheet_(name,headers){const ss=SpreadsheetApp.getActive(); let sh=ss.getSheetByName(name); if(!sh){sh=ss.insertSheet(name); sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1);} return sh;}
+function formatDateTime_(v){if(!v)return"";const d=new Date(v);return isNaN(d)?String(v):Utilities.formatDate(d,Session.getScriptTimeZone(),"dd/MM/yyyy HH:mm");}
+function startOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate());}
+function endOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59,999);}
+function parseDurasiMenit_(v){if(typeof v==="number")return v;const s=String(v||"");const j=Number((s.match(/(\d+)\s*jam/)||[])[1])||0,m=Number((s.match(/(\d+)\s*menit/)||[])[1])||0;return j*60+m;}
