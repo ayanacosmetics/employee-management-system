@@ -278,11 +278,13 @@
 
         </div>
 
-        <button
-          class="attendance-primary"
-          onclick="resetAttendance()">
+        <button id="openPortalButton" class="attendance-primary" onclick="openEmployeePortal()">
+          <i data-lucide="layout-dashboard"></i>
+          Buka Portal Karyawan
+        </button>
 
-          Selesai
+        <button class="attendance-secondary" onclick="resetAttendance()">
+          Selesai dan Tutup
         </button>
 
       </div>
@@ -970,6 +972,26 @@
             "successNote"
         ).innerText = data.status;
 
+        // Buat sesi portal setelah absensi berhasil. Jika pembuatan sesi gagal,
+        // absensi tetap dianggap berhasil dan fitur lama tidak terpengaruh.
+        try {
+          const portalResponse = await fetch(EMS_API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({ action: "loginPortal", pin: currentPin, idToko: tokoId })
+          });
+          const portalData = await portalResponse.json();
+          if (portalData.success && portalData.token) {
+            localStorage.setItem("ems_portal_session", JSON.stringify({
+              token: portalData.token,
+              expiresAt: Date.now() + (portalData.expiresInHours || 12) * 3600000,
+              karyawan: portalData.karyawan
+            }));
+          }
+        } catch (portalError) {
+          console.warn("Sesi portal tidak dapat dibuat:", portalError);
+        }
+
         Swal.close();
         showStep(4);
 
@@ -980,6 +1002,10 @@
             text: error.message
         });
         }
+    }
+
+    function openEmployeePortal() {
+      window.location.href = "portal.html";
     }
 
     function resetAttendance() {

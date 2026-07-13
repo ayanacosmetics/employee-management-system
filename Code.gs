@@ -119,6 +119,31 @@ function doGet(e) {
     return json(getPengaturanAdmin_());
   }
 
+  // Portal Karyawan V7 - endpoint tambahan, tidak mengganti endpoint lama.
+  if (action === "getPortalHome") {
+    return json(getPortalHome_(e.parameter.token));
+  }
+
+  if (action === "getPortalJadwal") {
+    return json(getPortalJadwal_(e.parameter.token, e.parameter.tanggalMulai, e.parameter.tanggalAkhir));
+  }
+
+  if (action === "getPortalRiwayat") {
+    return json(getPortalRiwayat_(e.parameter.token, e.parameter.bulan, e.parameter.tahun));
+  }
+
+  if (action === "getPortalIzin") {
+    return json(getPortalIzin_(e.parameter.token));
+  }
+
+  if (action === "getPortalPayroll") {
+    return json(getPortalPayroll_(e.parameter.token, e.parameter.bulan, e.parameter.tahun));
+  }
+
+  if (action === "getPortalPengumuman") {
+    return json(getPortalPengumuman_(e.parameter.token));
+  }
+
   return json({
     success: true,
     message: "EMS API aktif"
@@ -181,6 +206,23 @@ function doPost(e) {
 
   if (action === "testWhatsApp") {
     return json(testWhatsApp_(data));
+  }
+
+  // Portal Karyawan V7.
+  if (action === "loginPortal") {
+    return json(loginPortal_(data));
+  }
+
+  if (action === "saveIzinPortal") {
+    return json(saveIzinPortal_(data));
+  }
+
+  if (action === "updateProfilPortal") {
+    return json(updateProfilPortal_(data));
+  }
+
+  if (action === "notifyPayroll") {
+    return json(notifyPayroll_(data));
   }
 
   return json({
@@ -1696,7 +1738,10 @@ function listIzinAdmin_(filter) {
     status: String(r[6] || "Menunggu").trim(),
     diprosesPada: r[7] ? formatDateTime_(r[7]) : "",
     diprosesOleh: String(r[8] || "").trim(),
-    catatanAdmin: String(r[9] || "").trim()
+    catatanAdmin: String(r[9] || "").trim(),
+    tanggalSelesai: normalizeDate_(r[10]),
+    bukti: String(r[11] || "").trim(),
+    diajukanPada: r[12] ? formatDateTime_(r[12]) : ""
   })).filter(x => {
     const d = parseTanggal_(x.tanggal);
     return (!idToko || x.idToko === idToko) &&
@@ -1812,3 +1857,213 @@ function formatDateTime_(v){if(!v)return"";const d=new Date(v);return isNaN(d)?S
 function startOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate());}
 function endOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59,999);}
 function parseDurasiMenit_(v){if(typeof v==="number")return v;const s=String(v||"");const j=Number((s.match(/(\d+)\s*jam/)||[])[1])||0,m=Number((s.match(/(\d+)\s*menit/)||[])[1])||0;return j*60+m;}
+
+
+// ============================================================
+// PORTAL KARYAWAN V7
+// Seluruh fungsi di bawah bersifat tambahan dan tidak mengubah alur absensi lama.
+// ============================================================
+const PORTAL_SESSION_HOURS = 12;
+
+function getPortalSecret_() {
+  const props = PropertiesService.getScriptProperties();
+  let secret = props.getProperty("EMS_PORTAL_SECRET");
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty("EMS_PORTAL_SECRET", secret);
+  }
+  return secret;
+}
+
+function base64UrlEncode_(value) {
+  return Utilities.base64EncodeWebSafe(String(value), Utilities.Charset.UTF_8).replace(/=+$/g, "");
+}
+
+function makePortalToken_(idKaryawan) {
+  const payload = {
+    id: String(idKaryawan || "").trim(),
+    exp: Date.now() + PORTAL_SESSION_HOURS * 60 * 60 * 1000,
+    nonce: Utilities.getUuid()
+  };
+  const body = base64UrlEncode_(JSON.stringify(payload));
+  const sig = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(body, getPortalSecret_())
+  ).replace(/=+$/g, "");
+  return body + "." + sig;
+}
+
+function verifyPortalToken_(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length !== 2) return null;
+    const expected = Utilities.base64EncodeWebSafe(
+      Utilities.computeHmacSha256Signature(parts[0], getPortalSecret_())
+    ).replace(/=+$/g, "");
+    if (expected !== parts[1]) return null;
+    const decoded = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString();
+    const payload = JSON.parse(decoded);
+    if (!payload.id || Number(payload.exp) < Date.now()) return null;
+    const karyawan = getKaryawanById_(payload.id);
+    if (!karyawan || String(karyawan.status || "").toLowerCase() !== "aktif") return null;
+    return karyawan;
+  } catch (error) {
+    return null;
+  }
+}
+
+function portalAuthError_() {
+  return { success: false, sessionExpired: true, message: "Sesi portal tidak valid atau sudah berakhir. Silakan masuk kembali." };
+}
+
+function loginPortal_(data) {
+  const pin = String(data.pin || "").trim();
+  const idToko = String(data.idToko || "").trim();
+  const result = getKaryawanByPin_(pin);
+  if (!result.success) return result;
+  const k = result.karyawan;
+  if (idToko && String(k.idToko || "") !== idToko) {
+    return { success: false, message: "Anda tidak terdaftar di toko ini." };
+  }
+  return {
+    success: true,
+    token: makePortalToken_(k.id),
+    expiresInHours: PORTAL_SESSION_HOURS,
+    karyawan: sanitizePortalEmployee_(k)
+  };
+}
+
+function sanitizePortalEmployee_(k) {
+  return {
+    id: k.id, nama: k.nama, jabatan: k.jabatan, shiftDefault: k.shiftDefault,
+    noHp: k.noHp, foto: k.foto, idToko: k.idToko, status: k.status
+  };
+}
+
+function getPortalHome_(token) {
+  const k = verifyPortalToken_(token);
+  if (!k) return portalAuthError_();
+  const today = todayDate_();
+  const shift = getShiftKaryawan_(k.id, normalizeDate_(today));
+  const rows = getRows_(getSheet_(SHEET_ABSENSI), 15);
+  const attendance = rows.find(r => normalizeDate_(r[0]) === normalizeDate_(today) && String(r[1] || "").trim() === k.id);
+  const toko = getToko_(k.idToko);
+  return {
+    success: true,
+    karyawan: sanitizePortalEmployee_(k),
+    toko: toko.success ? toko.toko : null,
+    shift: shift.success ? shift.shift : null,
+    hariIni: attendance ? {
+      jamMasuk: formatJam_(attendance[6]), statusMasuk: String(attendance[9] || ""),
+      jamPulang: formatJam_(attendance[10]), statusPulang: String(attendance[13] || ""), durasi: String(attendance[14] || "")
+    } : null
+  };
+}
+
+function getPortalJadwal_(token, tanggalMulai, tanggalAkhir) {
+  const k = verifyPortalToken_(token);
+  if (!k) return portalAuthError_();
+  const mulai = parseTanggal_(tanggalMulai) || todayDate_();
+  const akhir = parseTanggal_(tanggalAkhir) || new Date(mulai.getFullYear(), mulai.getMonth(), mulai.getDate() + 13);
+  const items = [];
+  for (let d = startOfDay_(mulai); d <= endOfDay_(akhir); d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const result = getShiftKaryawan_(k.id, normalizeDate_(d));
+    items.push({ tanggal: normalizeDate_(d), shift: result.success ? result.shift : null });
+  }
+  return { success: true, items };
+}
+
+function getPortalRiwayat_(token, bulan, tahun) {
+  const k = verifyPortalToken_(token);
+  if (!k) return portalAuthError_();
+  return getRiwayatAbsensi_(k.id, bulan, tahun);
+}
+
+function getPortalIzin_(token) {
+  const k = verifyPortalToken_(token);
+  if (!k) return portalAuthError_();
+  const sh = getSheet_(SHEET_IZIN);
+  const rows = getRows_(sh, Math.max(13, sh.getLastColumn()));
+  const items = rows.map((r, i) => ({
+    row: i + 2, tanggalMulai: normalizeDate_(r[0]), tanggalSelesai: normalizeDate_(r[10]) || normalizeDate_(r[0]),
+    jenis: String(r[4] || ""), alasan: String(r[5] || ""), status: String(r[6] || "Menunggu"),
+    catatanAdmin: String(r[9] || ""), bukti: String(r[11] || ""), diajukanPada: r[12] ? formatDateTime_(r[12]) : ""
+  })).filter(x => String(rows[x.row - 2][1] || "").trim() === k.id).reverse();
+  return { success: true, items };
+}
+
+function saveIzinPortal_(data) {
+  const k = verifyPortalToken_(data.token);
+  if (!k) return portalAuthError_();
+  const jenis = String(data.jenis || "").trim();
+  const alasan = String(data.alasan || "").trim();
+  const mulai = parseTanggal_(data.tanggalMulai);
+  const selesai = parseTanggal_(data.tanggalSelesai) || mulai;
+  if (!jenis || !alasan || !mulai || !selesai) return { success:false, message:"Jenis, tanggal, dan alasan wajib diisi." };
+  if (endOfDay_(selesai) < startOfDay_(mulai)) return { success:false, message:"Tanggal selesai tidak boleh sebelum tanggal mulai." };
+  let buktiUrl = "";
+  const buktiBase64 = String(data.buktiBase64 || "").trim();
+  if (buktiBase64) buktiUrl = simpanBuktiIzin_(buktiBase64, `${k.id}_${formatFileTime_(new Date())}_izin`);
+  const sh = getSheet_(SHEET_IZIN);
+  sh.appendRow([mulai, k.id, k.nama, k.idToko, jenis, alasan, "Menunggu", "", "", "", selesai, buktiUrl, new Date()]);
+  simpanLog_(k.nama, "Mengajukan izin portal", `${jenis}: ${normalizeDate_(mulai)} s.d. ${normalizeDate_(selesai)}`);
+  return { success:true, message:"Pengajuan berhasil dikirim dan menunggu persetujuan admin." };
+}
+
+function simpanBuktiIzin_(dataUrl, filePrefix) {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error("Format bukti tidak valid.");
+  const mime = match[1];
+  const ext = mime.indexOf("pdf") >= 0 ? "pdf" : (mime.indexOf("png") >= 0 ? "png" : "jpg");
+  const blob = Utilities.newBlob(Utilities.base64Decode(match[2]), mime, `${filePrefix}.${ext}`);
+  return getOrCreateFolder_("Bukti Izin").createFile(blob).getUrl();
+}
+
+function getPortalPayroll_(token, bulan, tahun) {
+  const k = verifyPortalToken_(token);
+  if (!k) return portalAuthError_();
+  const m = Number(bulan) || todayDate_().getMonth() + 1;
+  const y = Number(tahun) || todayDate_().getFullYear();
+  const sh = getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
+  const periode = `${y}-${String(m).padStart(2,"0")}`;
+  const row = getRows_(sh,14).find(r => String(r[0] || "") === periode && String(r[1] || "") === k.id);
+  if (!row) return { success:true, payroll:null, message:"Slip gaji periode ini belum tersedia." };
+  return { success:true, payroll:{ periode, nama:String(row[2]||""), hadir:Number(row[4])||0, terlambat:Number(row[5])||0, totalDurasi:Number(row[6])||0, gajiPokok:Number(row[7])||0, tunjangan:Number(row[8])||0, potongan:Number(row[9])||0, gajiBersih:Number(row[10])||0, status:String(row[11]||"Draft"), catatan:String(row[12]||"") } };
+}
+
+function getPortalPengumuman_(token) {
+  const k = verifyPortalToken_(token);
+  if (!k) return portalAuthError_();
+  const data = listPengumuman_({aktifSaja:"1"});
+  data.items = (data.items || []).filter(x => !x.idToko || x.idToko === k.idToko);
+  return data;
+}
+
+function updateProfilPortal_(data) {
+  const k = verifyPortalToken_(data.token);
+  if (!k) return portalAuthError_();
+  const noHp = String(data.noHp || "").trim();
+  const pinBaru = String(data.pinBaru || "").trim();
+  if (pinBaru && !/^\d{4}$/.test(pinBaru)) return {success:false,message:"PIN baru harus 4 digit."};
+  const sh = getSheet_(SHEET_KARYAWAN);
+  const rows = getRows_(sh,10);
+  const idx = rows.findIndex(r => String(r[0] || "").trim() === k.id);
+  if (idx < 0) return {success:false,message:"Karyawan tidak ditemukan."};
+  if (pinBaru) {
+    const duplicate = rows.some((r,i) => i !== idx && String(r[3] || "").trim() === pinBaru);
+    if (duplicate) return {success:false,message:"PIN sudah digunakan karyawan lain."};
+    sh.getRange(idx+2,4).setValue(pinBaru);
+  }
+  sh.getRange(idx+2,8).setValue(noHp);
+  simpanLog_(k.nama,"Memperbarui profil portal", pinBaru ? "Nomor HP dan PIN diperbarui" : "Nomor HP diperbarui");
+  return {success:true,message:"Profil berhasil diperbarui.",token:pinBaru ? makePortalToken_(k.id) : String(data.token)};
+}
+
+function notifyPayroll_(data) {
+  const id = String(data.idKaryawan || "").trim();
+  const periode = String(data.periode || "").trim();
+  const k = getKaryawanById_(id);
+  if (!k) return {success:false,message:"Karyawan tidak ditemukan."};
+  if (!k.noHp) return {success:false,message:"Nomor WhatsApp karyawan belum diisi."};
+  const msg = `Halo ${k.nama}, slip gaji periode ${periode} sudah tersedia di Portal Karyawan EMS. Silakan login untuk melihat rinciannya.`;
+  return kirimWhatsApp_(k.noHp, msg, null, []);
+}
