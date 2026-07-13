@@ -75,12 +75,6 @@
         onchange="loadDashboard()"
       >
         <option value="">Semua Toko</option>
-        <option value="T001">
-            TK. Ana Yuliana
-        </option>
-        <option value="T002">
-            TK. Ayana Cosmetics
-        </option>
       </select>
 
       <button class="icon-button">
@@ -167,6 +161,45 @@
   <script src="js/config.js"></script>
 
   <script>
+
+   async function loadDaftarToko() {
+    const select =
+        document.getElementById("filterToko");
+
+    try {
+        const response = await fetch(
+        `${EMS_API_URL}?action=listToko`
+        );
+
+        const data = await response.json();
+
+        if (!data.success) {
+         throw new Error(
+            data.message || "Daftar toko gagal dimuat."
+         );
+        }
+
+        select.innerHTML =
+          `<option value="">Semua Toko</option>`;
+
+        data.items.forEach(toko => {
+          const option =
+            document.createElement("option");
+
+          option.value = toko.id;
+          option.textContent = toko.nama;
+
+          select.appendChild(option);
+        });
+
+      } catch (error) {
+        console.error(
+          "Gagal memuat daftar toko:",
+          error
+        );
+      }
+    }
+
     async function loadDashboard() {
       const filterToko =
         document.getElementById("filterToko").value;
@@ -237,8 +270,13 @@
       }
     }
 
-    loadDashboard();
-    lucide.createIcons();
+    async function initDashboard() {
+        await loadDaftarToko();
+        await loadDashboard();
+        lucide.createIcons();
+    }
+
+    initDashboard();
   </script>
 </body>
 </html>
