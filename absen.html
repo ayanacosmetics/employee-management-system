@@ -146,6 +146,16 @@
             Ambil Selfie
           </button>
 
+          <button
+            id="retakeButton"
+            class="attendance-secondary"
+            onclick="retakeSelfie()"
+            style="display:none"
+          >
+            <i data-lucide="refresh-cw"></i>
+            Foto Ulang
+          </button>
+
         </div>
 
       </div>
@@ -191,11 +201,13 @@
         </div>
 
         <button
-          class="attendance-primary"
-          onclick="submitAttendance()">
-
-          <i data-lucide="check-circle-2"></i>
-          Verifikasi dan Absen
+            id="submitAttendanceButton"
+            class="attendance-primary"
+            onclick="submitAttendance()"
+            disabled
+        >
+            <i data-lucide="check-circle-2"></i>
+            Verifikasi dan Absen
         </button>
 
       </div>
@@ -477,6 +489,8 @@
             statusEl.innerText =
             "Dalam area toko";
 
+            updateSubmitButton();
+
             Swal.fire({
             icon: "success",
             title: "Lokasi sesuai",
@@ -594,9 +608,11 @@
             0.72
         );
 
-        preview.src = selfieData;
-        preview.style.display = "block";
-        video.style.display = "none";
+        document.getElementById(
+          "retakeButton"
+        ).style.display = "inline-flex";
+
+        updateSubmitButton();
 
         if (cameraStream) {
         cameraStream
@@ -637,11 +653,61 @@
         );
 
         dots.forEach((dot, index) => {
-        dot.classList.toggle(
+          dot.classList.toggle(
             "filled",
             index < currentPin.length
-        );
+          );
         });
+
+        updateSubmitButton();
+
+    }
+
+    function updateSubmitButton() {
+        const button =
+            document.getElementById(
+            "submitAttendanceButton"
+            );
+
+        const gpsSiap =
+            currentLatitude !== null &&
+            currentLongitude !== null &&
+            currentToko &&
+            currentDistance <= Number(currentToko.radius) &&
+            currentAccuracy <= 100;
+
+        const selfieSiap =
+            Boolean(selfieData);
+
+        const pinSiap =
+            currentPin.length === 4;
+
+        button.disabled =
+            !(gpsSiap && selfieSiap && pinSiap);
+        }
+
+        async function retakeSelfie() {
+        selfieData = "";
+
+        document.getElementById(
+            "selfiePreview"
+        ).style.display = "none";
+
+        document.getElementById(
+            "cameraVideo"
+        ).style.display = "block";
+
+        document.getElementById(
+            "retakeButton"
+        ).style.display = "none";
+
+        document.getElementById(
+            "captureButton"
+        ).disabled = true;
+
+        updateSubmitButton();
+
+        await startCamera();
     }
 
     async function submitAttendance() {
@@ -802,6 +868,14 @@
 
         document.getElementById(
         "captureButton"
+        ).disabled = true;
+
+        document.getElementById(
+        "retakeButton"
+        ).style.display = "none";
+
+        document.getElementById(
+        "submitAttendanceButton"
         ).disabled = true;
 
         updatePinDisplay();
