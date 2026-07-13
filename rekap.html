@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Riwayat Absensi - EMS</title>
+
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">E</div>
+      <div>
+        <h2>EMS</h2>
+        <small>Employee Management System</small>
+      </div>
+    </div>
+
+    <nav>
+      <a href="index.html"><i data-lucide="layout-dashboard"></i>Dashboard</a>
+      <a href="karyawan.html"><i data-lucide="users"></i>Karyawan</a>
+      <a href="absen.html"><i data-lucide="scan-line"></i>Absensi</a>
+      <a href="shift.html"><i data-lucide="calendar-clock"></i>Jadwal Shift</a>
+      <a href="izin.html"><i data-lucide="file-text"></i>Izin & Cuti</a>
+      <a class="active" href="rekap.html"><i data-lucide="history"></i>Riwayat Absensi</a>
+      <a href="qr-toko.html"><i data-lucide="qr-code"></i>QR Absensi Toko</a>
+      <a href="pengaturan.html"><i data-lucide="settings"></i>Pengaturan</a>
+    </nav>
+  </aside>
+
+  <main class="main history-main">
+    <header class="header history-header">
+      <div>
+        <h1>Riwayat Absensi</h1>
+        <p>Pantau catatan masuk dan pulang seluruh karyawan.</p>
+      </div>
+      <button class="history-refresh-button" type="button" onclick="loadRiwayat(true)">
+        <i data-lucide="refresh-cw"></i>
+        Muat Ulang
+      </button>
+    </header>
+
+    <section class="history-summary-grid">
+      <article class="summary-card">
+        <span class="summary-icon green"><i data-lucide="user-check"></i></span>
+        <div><small>Total Hadir</small><strong id="summaryHadir">0</strong></div>
+      </article>
+      <article class="summary-card">
+        <span class="summary-icon orange"><i data-lucide="clock-3"></i></span>
+        <div><small>Terlambat</small><strong id="summaryTerlambat">0</strong></div>
+      </article>
+      <article class="summary-card">
+        <span class="summary-icon blue"><i data-lucide="log-in"></i></span>
+        <div><small>Absen Masuk</small><strong id="summaryMasuk">0</strong></div>
+      </article>
+      <article class="summary-card">
+        <span class="summary-icon purple-summary"><i data-lucide="log-out"></i></span>
+        <div><small>Absen Pulang</small><strong id="summaryPulang">0</strong></div>
+      </article>
+    </section>
+
+    <section class="panel history-filter-panel">
+      <div class="history-filter-grid">
+        <label>
+          <span>Toko</span>
+          <select id="filterToko">
+            <option value="">Semua Toko</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Tanggal Mulai</span>
+          <input id="filterMulai" type="date">
+        </label>
+
+        <label>
+          <span>Tanggal Akhir</span>
+          <input id="filterAkhir" type="date">
+        </label>
+
+        <label>
+          <span>Jenis Absensi</span>
+          <select id="filterJenis">
+            <option value="">Semua Jenis</option>
+            <option value="Masuk">Masuk</option>
+            <option value="Pulang">Pulang</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Status</span>
+          <select id="filterStatus">
+            <option value="">Semua Status</option>
+            <option value="Tepat Waktu">Tepat Waktu</option>
+            <option value="Terlambat">Terlambat</option>
+          </select>
+        </label>
+
+        <label class="history-search-field">
+          <span>Cari Karyawan</span>
+          <div class="history-search-box">
+            <i data-lucide="search"></i>
+            <input id="filterCari" type="search" placeholder="Nama atau ID karyawan">
+          </div>
+        </label>
+      </div>
+
+      <div class="history-filter-actions">
+        <button class="history-reset-button" type="button" onclick="resetFilter()">
+          <i data-lucide="rotate-ccw"></i>
+          Reset
+        </button>
+        <button class="history-apply-button" type="button" onclick="applyFilter()">
+          <i data-lucide="list-filter"></i>
+          Terapkan Filter
+        </button>
+      </div>
+    </section>
+
+    <section class="panel history-table-panel">
+      <div class="history-table-heading">
+        <div>
+          <h3>Data Absensi</h3>
+          <p id="historyResultInfo">Memuat data...</p>
+        </div>
+        <select id="pageSize" aria-label="Jumlah data per halaman" onchange="changePageSize()">
+          <option value="10">10 per halaman</option>
+          <option value="25">25 per halaman</option>
+          <option value="50">50 per halaman</option>
+        </select>
+      </div>
+
+      <div class="history-table-wrap">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Tanggal</th>
+              <th>Karyawan</th>
+              <th>Toko</th>
+              <th>Jenis</th>
+              <th>Waktu</th>
+              <th>Status</th>
+              <th>Lokasi</th>
+              <th>Selfie</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <tr><td colspan="8" class="history-empty-cell">Memuat riwayat absensi...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="history-pagination">
+        <button id="prevPage" type="button" onclick="goToPage(currentPage - 1)">
+          <i data-lucide="chevron-left"></i>
+          Sebelumnya
+        </button>
+        <span id="pageInfo">Halaman 1 dari 1</span>
+        <button id="nextPage" type="button" onclick="goToPage(currentPage + 1)">
+          Berikutnya
+          <i data-lucide="chevron-right"></i>
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script>
+    let allItems = [];
+    let filteredItems = [];
+    let currentPage = 1;
+    let pageSize = 10;
+
+    const $ = id => document.getElementById(id);
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function normalizeDateInput(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function setDefaultDates() {
+      const today = new Date();
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      $("filterMulai").value = normalizeDateInput(firstDay);
+      $("filterAkhir").value = normalizeDateInput(today);
+    }
+
+    function parseDate(value) {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function formatTanggal(value) {
+      const date = parseDate(value);
+      if (!date) return value || "-";
+      return date.toLocaleDateString("id-ID", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric"
+      });
+    }
+
+    function formatWaktu(item) {
+      if (item.jam) return item.jam;
+      const date = parseDate(item.waktu || item.timestamp || item.tanggal);
+      if (!date) return "-";
+      return date.toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    async function loadDaftarToko() {
+      try {
+        const response = await fetch(`${EMS_API_URL}?action=listToko`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.message || "Daftar toko gagal dimuat.");
+
+        const selected = $("filterToko").value;
+        $("filterToko").innerHTML = '<option value="">Semua Toko</option>';
+        (data.items || []).forEach(toko => {
+          const option = document.createElement("option");
+          option.value = toko.id;
+          option.textContent = toko.nama;
+          $("filterToko").appendChild(option);
+        });
+        $("filterToko").value = selected;
+      } catch (error) {
+        console.error("Gagal memuat toko:", error);
+      }
+    }
+
+    function buildRiwayatUrl() {
+      const params = new URLSearchParams({ action: "getRiwayatAbsensiAdmin" });
+      if ($("filterToko").value) params.set("idToko", $("filterToko").value);
+      if ($("filterMulai").value) params.set("tanggalMulai", $("filterMulai").value);
+      if ($("filterAkhir").value) params.set("tanggalAkhir", $("filterAkhir").value);
+      if ($("filterJenis").value) params.set("jenis", $("filterJenis").value);
+      if ($("filterStatus").value) params.set("status", $("filterStatus").value);
+      if ($("filterCari").value.trim()) params.set("cari", $("filterCari").value.trim());
+      return `${EMS_API_URL}?${params.toString()}`;
+    }
+
+    async function loadRiwayat(showSuccess = false) {
+      setLoadingState();
+      try {
+        const response = await fetch(buildRiwayatUrl());
+        const text = await response.text();
+        if (text.trim().startsWith("<")) throw new Error("Apps Script mengembalikan halaman error.");
+        const data = JSON.parse(text);
+        if (!data.success) throw new Error(data.message || "Riwayat absensi gagal dimuat.");
+
+        allItems = Array.isArray(data.items) ? data.items : [];
+        filteredItems = allItems.slice();
+        currentPage = 1;
+        renderSummary(data.summary || null);
+        renderTable();
+
+        if (showSuccess) {
+          Swal.fire({ icon: "success", title: "Data diperbarui", timer: 1000, showConfirmButton: false });
+        }
+      } catch (error) {
+        allItems = [];
+        filteredItems = [];
+        renderTable();
+        $("historyResultInfo").textContent = "Riwayat belum dapat dimuat.";
+        Swal.fire({
+          icon: "error",
+          title: "Riwayat gagal dimuat",
+          text: error.message + " Pastikan Code.gs terbaru sudah ditempel dan deployment Apps Script sudah diperbarui."
+        });
+      }
+    }
+
+    function setLoadingState() {
+      $("historyTableBody").innerHTML = '<tr><td colspan="8" class="history-empty-cell">Memuat riwayat absensi...</td></tr>';
+      $("historyResultInfo").textContent = "Memuat data...";
+    }
+
+    function applyFilter() {
+      currentPage = 1;
+      loadRiwayat();
+    }
+
+    function resetFilter() {
+      $("filterToko").value = "";
+      $("filterJenis").value = "";
+      $("filterStatus").value = "";
+      $("filterCari").value = "";
+      setDefaultDates();
+      currentPage = 1;
+      loadRiwayat();
+    }
+
+    function renderSummary(summary = null) {
+      const data = summary || {
+        hadir: new Set(filteredItems.filter(item => String(item.jenis).toLowerCase() === "masuk").map(item => `${item.tanggal}|${item.idKaryawan}`)).size,
+        terlambat: filteredItems.filter(item => String(item.status || "").toLowerCase().includes("terlambat")).length,
+        masuk: filteredItems.filter(item => String(item.jenis || "").toLowerCase() === "masuk").length,
+        pulang: filteredItems.filter(item => String(item.jenis || "").toLowerCase() === "pulang").length
+      };
+      $("summaryHadir").textContent = Number(data.hadir) || 0;
+      $("summaryTerlambat").textContent = Number(data.terlambat) || 0;
+      $("summaryMasuk").textContent = Number(data.masuk) || 0;
+      $("summaryPulang").textContent = Number(data.pulang) || 0;
+    }
+
+    function getStatusClass(status) {
+      const value = String(status || "").toLowerCase();
+      if (value.includes("terlambat")) return "late";
+      if (value.includes("tepat")) return "ontime";
+      return "neutral";
+    }
+
+    function getJenisClass(jenis) {
+      return String(jenis || "").toLowerCase() === "pulang" ? "out" : "in";
+    }
+
+    function renderTable() {
+      const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+      currentPage = Math.min(Math.max(1, currentPage), totalPages);
+      const start = (currentPage - 1) * pageSize;
+      const pageItems = filteredItems.slice(start, start + pageSize);
+
+      if (!pageItems.length) {
+        $("historyTableBody").innerHTML = '<tr><td colspan="8" class="history-empty-cell"><i data-lucide="calendar-x"></i><b>Belum ada data absensi</b><span>Coba ubah rentang tanggal atau filter pencarian.</span></td></tr>';
+      } else {
+        $("historyTableBody").innerHTML = pageItems.map(item => {
+          const nama = item.nama || item.namaKaryawan || "-";
+          const idKaryawan = item.idKaryawan || item.id || "";
+          const toko = item.namaToko || item.toko || item.idToko || "-";
+          const jenis = item.jenis || item.tipe || "-";
+          const status = item.status || item.keterangan || "-";
+          const tanggal = item.tanggal || item.waktu || item.timestamp;
+          const lokasi = String(item.lokasi || "").trim();
+          const lokasiCell = lokasi ? `<a class="history-location-link" href="https://www.google.com/maps?q=${encodeURIComponent(lokasi)}" target="_blank" rel="noopener"><i data-lucide="map-pin"></i>Lihat</a>` : "-";
+          const foto = item.foto || item.selfieUrl || item.urlFoto || "";
+          return `
+            <tr>
+              <td><b>${escapeHtml(formatTanggal(tanggal))}</b></td>
+              <td><div class="history-employee"><span class="history-avatar">${escapeHtml(nama.charAt(0).toUpperCase())}</span><span><b>${escapeHtml(nama)}</b><small>${escapeHtml(idKaryawan)}</small></span></div></td>
+              <td>${escapeHtml(toko)}</td>
+              <td><span class="history-type-badge ${getJenisClass(jenis)}">${escapeHtml(jenis)}</span></td>
+              <td>${escapeHtml(formatWaktu(item))}</td>
+              <td><span class="history-status-badge ${getStatusClass(status)}">${escapeHtml(status)}</span></td>
+              <td>${lokasiCell}</td>
+              <td>${foto ? `<button class="history-photo-button" type="button" onclick='showPhoto(${JSON.stringify(String(foto))}, ${JSON.stringify(String(nama))})'><i data-lucide="image"></i>Lihat</button>` : '<span class="history-no-photo">-</span>'}</td>
+            </tr>`;
+        }).join("");
+      }
+
+      const firstShown = filteredItems.length ? start + 1 : 0;
+      const lastShown = Math.min(start + pageSize, filteredItems.length);
+      $("historyResultInfo").textContent = `Menampilkan ${firstShown}-${lastShown} dari ${filteredItems.length} data`;
+      $("pageInfo").textContent = `Halaman ${currentPage} dari ${totalPages}`;
+      $("prevPage").disabled = currentPage <= 1;
+      $("nextPage").disabled = currentPage >= totalPages;
+      lucide.createIcons();
+    }
+
+    function showPhoto(url, nama) {
+      Swal.fire({
+        title: `Selfie ${nama}`,
+        imageUrl: url,
+        imageAlt: `Selfie absensi ${nama}`,
+        imageWidth: 360,
+        confirmButtonText: "Tutup",
+        confirmButtonColor: "#6d28d9"
+      });
+    }
+
+    function goToPage(page) {
+      const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+      if (page < 1 || page > totalPages) return;
+      currentPage = page;
+      renderTable();
+      document.querySelector(".history-table-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function changePageSize() {
+      pageSize = Number($("pageSize").value) || 10;
+      currentPage = 1;
+      renderTable();
+    }
+
+    $("filterCari").addEventListener("keydown", event => {
+      if (event.key === "Enter") applyFilter();
+    });
+
+    async function initRiwayat() {
+      setDefaultDates();
+      await loadDaftarToko();
+      await loadRiwayat();
+      lucide.createIcons();
+    }
+
+    initRiwayat();
+  </script>
+</body>
+</html>
