@@ -750,6 +750,7 @@
         document.getElementById("shiftStart").innerText = currentShift.masuk || "-";
         document.getElementById("shiftEnd").innerText = currentShift.pulang || "-";
         updateShiftStatus();
+        updateSubmitButton();
       } catch (error) {
         if (token !== shiftRequestToken) return;
         currentEmployee = null;
