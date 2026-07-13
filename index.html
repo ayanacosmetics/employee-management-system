@@ -69,6 +69,20 @@
         <p>Selamat datang kembali</p>
       </div>
 
+      <select
+        id="filterToko"
+        class="dashboard-store-filter"
+        onchange="loadDashboard()"
+      >
+        <option value="">Semua Toko</option>
+        <option value="T001">
+            TK. Ana Yuliana
+        </option>
+        <option value="T002">
+            TK. Ayana Cosmetics
+        </option>
+      </select>
+
       <button class="icon-button">
         <i data-lucide="bell"></i>
       </button>
@@ -81,7 +95,7 @@
         </span>
         <div>
           <small>Hadir</small>
-          <strong>18</strong>
+          <strong id="jumlahHadir">0</strong>
         </div>
       </article>
 
@@ -91,7 +105,7 @@
         </span>
         <div>
           <small>Terlambat</small>
-          <strong>2</strong>
+          <strong id="jumlahTerlambat">0</strong>
         </div>
       </article>
 
@@ -101,7 +115,7 @@
         </span>
         <div>
           <small>Belum Hadir</small>
-          <strong>3</strong>
+          <strong id="jumlahBelumHadir">0</strong>
         </div>
       </article>
 
@@ -111,7 +125,7 @@
         </span>
         <div>
           <small>Sedang Bekerja</small>
-          <strong>15</strong>
+          <strong id="jumlahSedangBekerja">0</strong>
         </div>
       </article>
     </section>
@@ -127,21 +141,11 @@
       <article class="panel">
         <h3>Karyawan Terbaru Absen</h3>
 
-        <div class="attendance-list">
-          <div>
-            <span>Budhi Wirayudha</span>
-            <small>08:02 WIB</small>
-          </div>
-
-          <div>
-            <span>Rian Maulana</span>
-            <small>08:05 WIB</small>
-          </div>
-
-          <div>
-            <span>Siti Aisyah</span>
-            <small>08:08 WIB</small>
-          </div>
+        <div
+          class="attendance-list"
+          id="attendanceLatest"
+        >
+          <p>Memuat data...</p>
         </div>
       </article>
 
@@ -160,7 +164,80 @@
     </section>
   </main>
 
+  <script src="js/config.js"></script>
+
   <script>
+    async function loadDashboard() {
+      const filterToko =
+        document.getElementById("filterToko").value;
+
+      const latest =
+        document.getElementById("attendanceLatest");
+
+      const url =
+        `${EMS_API_URL}?action=getDashboard` +
+        `&idToko=${encodeURIComponent(filterToko)}`;
+
+      try {
+        latest.innerHTML = "<p>Memuat data...</p>";
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(
+            data.message || "Dashboard gagal dimuat."
+          );
+        }
+
+        const summary = data.summary || {};
+
+        document.getElementById("jumlahHadir").innerText =
+          summary.hadir || 0;
+
+        document.getElementById("jumlahTerlambat").innerText =
+          summary.terlambat || 0;
+
+        document.getElementById("jumlahBelumHadir").innerText =
+          summary.belumHadir || 0;
+
+        document.getElementById("jumlahSedangBekerja").innerText =
+          summary.sedangBekerja || 0;
+
+        const items = data.terbaru || [];
+
+        if (items.length === 0) {
+          latest.innerHTML =
+            "<p>Belum ada karyawan yang absen hari ini.</p>";
+
+          return;
+        }
+
+        latest.innerHTML = items.map(item => `
+          <div>
+            <span>
+              <b>${item.nama || "-"}</b>
+
+              <small class="attendance-store-name">
+                ${item.namaToko || ""}
+              </small>
+            </span>
+
+            <small>
+              ${item.jamMasuk || "-"}
+            </small>
+          </div>
+        `).join("");
+
+      } catch (error) {
+        latest.innerHTML =
+          `<p>Gagal memuat data: ${error.message}</p>`;
+
+        console.error(error);
+      }
+    }
+
+    loadDashboard();
     lucide.createIcons();
   </script>
 </body>

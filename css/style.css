@@ -951,3 +951,20 @@ nav a.active {
     margin-right: auto;
   }
 }
+
+.dashboard-store-filter {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid #e2e4ec;
+  border-radius: 12px;
+  background: white;
+  color: #292b3a;
+  font-weight: 600;
+}
+
+.attendance-store-name {
+  display: block;
+  margin-top: 4px;
+  color: #8a8d9e !important;
+  font-size: 11px;
+}
