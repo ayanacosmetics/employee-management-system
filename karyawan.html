@@ -50,8 +50,8 @@
       <div class="employee-table-heading"><div><h3>Daftar Karyawan</h3><p id="employeeTableInfo">Memuat data...</p></div><button class="employee-icon-button" type="button" onclick="loadEmployees()" title="Perbarui"><i data-lucide="refresh-cw"></i></button></div>
       <div class="employee-table-scroll">
         <table class="employee-table">
-          <thead><tr><th>Karyawan</th><th>Toko</th><th>Jabatan</th><th>Shift</th><th>Barcode</th><th>No. HP</th><th>Status</th><th>Aksi</th></tr></thead>
-          <tbody id="employeeTableBody"><tr><td colspan="8" class="employee-empty">Memuat data...</td></tr></tbody>
+          <thead><tr><th>Karyawan</th><th>Toko</th><th>Jabatan</th><th>Shift</th><th>Barcode</th><th>No. HP</th><th>Email</th><th>Status</th><th>Aksi</th></tr></thead>
+          <tbody id="employeeTableBody"><tr><td colspan="9" class="employee-empty">Memuat data...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -68,7 +68,7 @@
           <label><span>PIN Absensi *</span><div class="employee-pin-wrap"><input id="employeePin" required inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" placeholder="4–8 digit"><button type="button" onclick="generatePin()">Acak</button></div><small>Harus unik dan hanya angka.</small></label>
           <label><span>Barcode</span><input id="employeeBarcode" inputmode="numeric" placeholder="Kosongkan untuk otomatis"><small>Tidak dipakai saat absen PIN, tetapi tetap disimpan.</small></label>
           <label><span>Jabatan *</span><input id="employeePosition" required maxlength="80" placeholder="Contoh: Kasir"></label>
-          <label><span>Nomor HP</span><input id="employeePhone" inputmode="tel" maxlength="25" placeholder="08xxxxxxxxxx"></label>
+          <label><span>Nomor HP</span><input id="employeePhone" inputmode="tel" maxlength="25" placeholder="08xxxxxxxxxx"></label><label><span>Email Slip Gaji</span><input id="employeeEmail" type="email" maxlength="120" placeholder="nama@email.com"></label>
           <label><span>Toko *</span><select id="employeeStore" required><option value="">Pilih toko</option></select></label>
           <label><span>Shift Default *</span><select id="employeeShift" required><option value="">Pilih shift</option></select></label>
           <label><span>Status *</span><select id="employeeStatus" required><option value="Aktif">Aktif</option><option value="Nonaktif">Nonaktif</option></select></label>
@@ -79,7 +79,7 @@
     </section>
   </div>
 
-  <script src="js/config.js"></script>
+  <script src="js/config.js"></script><script src="js/admin-auth.js"></script>
   <script>
     let employees = [], stores = [], shifts = [], searchTimer;
     const esc = value => String(value ?? "").replace(/[&<>\'\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
@@ -105,23 +105,23 @@
     }
     function debouncedLoad() { clearTimeout(searchTimer); searchTimer = setTimeout(loadEmployees, 300); }
     async function loadEmployees() {
-      const body = document.getElementById("employeeTableBody"); body.innerHTML = `<tr><td colspan="8" class="employee-empty">Memuat data...</td></tr>`;
+      const body = document.getElementById("employeeTableBody"); body.innerHTML = `<tr><td colspan="9" class="employee-empty">Memuat data...</td></tr>`;
       try {
         const data = await requestGet({ action:"listKaryawanAdmin", idToko:filterStore.value, status:filterStatus.value, cari:filterSearch.value.trim() });
         employees = data.items || []; summaryTotal.textContent=data.summary.total||0; summaryActive.textContent=data.summary.aktif||0; summaryInactive.textContent=data.summary.nonaktif||0;
         employeeTableInfo.textContent = `${employees.length} karyawan ditemukan`; renderEmployees();
-      } catch (error) { body.innerHTML = `<tr><td colspan="8" class="employee-empty error">${esc(error.message)}</td></tr>`; }
+      } catch (error) { body.innerHTML = `<tr><td colspan="9" class="employee-empty error">${esc(error.message)}</td></tr>`; }
     }
     function renderEmployees() {
       const body = document.getElementById("employeeTableBody");
-      if (!employees.length) { body.innerHTML=`<tr><td colspan="8" class="employee-empty"><i data-lucide="users"></i><b>Data karyawan tidak ditemukan</b><span>Ubah filter atau tambah karyawan baru.</span></td></tr>`; lucide.createIcons(); return; }
+      if (!employees.length) { body.innerHTML=`<tr><td colspan="9" class="employee-empty"><i data-lucide="users"></i><b>Data karyawan tidak ditemukan</b><span>Ubah filter atau tambah karyawan baru.</span></td></tr>`; lucide.createIcons(); return; }
       body.innerHTML = employees.map(item => {
         const active = String(item.status).toLowerCase()==="aktif";
-        return `<tr><td><div class="employee-person">${item.foto?`<img src="${esc(item.foto)}" alt="">`:`<span>${esc(initials(item.nama))}</span>`}<div><b>${esc(item.nama)}</b><small>${esc(item.id)}</small></div></div></td><td>${esc(item.namaToko)}</td><td>${esc(item.jabatan||"-")}</td><td>${esc(item.shiftDefault||"-")}</td><td><code>${esc(item.barcode||"-")}</code></td><td>${esc(item.noHp||"-")}</td><td><span class="employee-status ${active?"active":"inactive"}">${esc(item.status||"-")}</span></td><td><div class="employee-actions"><button type="button" onclick="editEmployee('${esc(item.id)}')" title="Edit"><i data-lucide="pencil"></i></button><button type="button" onclick="toggleEmployeeStatus('${esc(item.id)}','${active?"Nonaktif":"Aktif"}')" title="${active?"Nonaktifkan":"Aktifkan"}" class="${active?"danger":"success"}"><i data-lucide="${active?"user-x":"user-check"}"></i></button></div></td></tr>`;
+        return `<tr><td><div class="employee-person">${item.foto?`<img src="${esc(item.foto)}" alt="">`:`<span>${esc(initials(item.nama))}</span>`}<div><b>${esc(item.nama)}</b><small>${esc(item.id)}</small></div></div></td><td>${esc(item.namaToko)}</td><td>${esc(item.jabatan||"-")}</td><td>${esc(item.shiftDefault||"-")}</td><td><code>${esc(item.barcode||"-")}</code></td><td>${esc(item.noHp||"-")}</td><td>${esc(item.email||"-")}</td><td><span class="employee-status ${active?"active":"inactive"}">${esc(item.status||"-")}</span></td><td><div class="employee-actions"><button type="button" onclick="editEmployee('${esc(item.id)}')" title="Edit"><i data-lucide="pencil"></i></button><button type="button" onclick="toggleEmployeeStatus('${esc(item.id)}','${active?"Nonaktif":"Aktif"}')" title="${active?"Nonaktifkan":"Aktifkan"}" class="${active?"danger":"success"}"><i data-lucide="${active?"user-x":"user-check"}"></i></button></div></td></tr>`;
       }).join(""); lucide.createIcons();
     }
     function openEmployeeModal(item=null) {
-      employeeForm.reset(); employeeId.value=item?.id||""; employeeName.value=item?.nama||""; employeePin.value=item?.pin||""; employeeBarcode.value=item?.barcode||""; employeePosition.value=item?.jabatan||""; employeePhone.value=item?.noHp||""; employeeStore.value=item?.idToko||""; employeeShift.value=item?.shiftDefault||""; employeeStatus.value=item?.status||"Aktif"; employeePhoto.value=item?.foto||"";
+      employeeForm.reset(); employeeId.value=item?.id||""; employeeName.value=item?.nama||""; employeePin.value=item?.pin||""; employeeBarcode.value=item?.barcode||""; employeePosition.value=item?.jabatan||""; employeePhone.value=item?.noHp||""; employeeEmail.value=item?.email||""; employeeStore.value=item?.idToko||""; employeeShift.value=item?.shiftDefault||""; employeeStatus.value=item?.status||"Aktif"; employeePhoto.value=item?.foto||"";
       employeeModalTitle.textContent=item?"Edit Karyawan":"Tambah Karyawan"; employeeModal.classList.add("open"); employeeModal.setAttribute("aria-hidden","false"); document.body.classList.add("modal-open"); setTimeout(()=>employeeName.focus(),100); lucide.createIcons();
     }
     function closeEmployeeModal(){ employeeModal.classList.remove("open"); employeeModal.setAttribute("aria-hidden","true"); document.body.classList.remove("modal-open"); }
@@ -129,7 +129,7 @@
     function generatePin(){ employeePin.value=String(Math.floor(1000+Math.random()*9000)); }
     async function saveEmployee(event){
       event.preventDefault(); saveEmployeeButton.disabled=true; saveEmployeeButton.classList.add("loading");
-      try { const data=await requestPost({action:"saveKaryawan",id:employeeId.value,nama:employeeName.value.trim(),pin:employeePin.value.trim(),barcode:employeeBarcode.value.trim(),jabatan:employeePosition.value.trim(),noHp:employeePhone.value.trim(),idToko:employeeStore.value,shiftDefault:employeeShift.value,status:employeeStatus.value,foto:employeePhoto.value.trim()}); closeEmployeeModal(); await Swal.fire({icon:"success",title:"Berhasil",text:data.message,timer:1600,showConfirmButton:false}); await loadEmployees(); }
+      try { const data=await requestPost({action:"saveKaryawan",id:employeeId.value,nama:employeeName.value.trim(),pin:employeePin.value.trim(),barcode:employeeBarcode.value.trim(),jabatan:employeePosition.value.trim(),noHp:employeePhone.value.trim(),email:employeeEmail.value.trim(),idToko:employeeStore.value,shiftDefault:employeeShift.value,status:employeeStatus.value,foto:employeePhoto.value.trim()}); closeEmployeeModal(); await Swal.fire({icon:"success",title:"Berhasil",text:data.message,timer:1600,showConfirmButton:false}); await loadEmployees(); }
       catch(error){ Swal.fire("Gagal",error.message,"error"); }
       finally{ saveEmployeeButton.disabled=false; saveEmployeeButton.classList.remove("loading"); }
     }

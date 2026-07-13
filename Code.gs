@@ -12,6 +12,24 @@ const SHEET_PAYROLL = "Payroll";
 function doGet(e) {
   const action = String(e.parameter.action || "").trim();
 
+  if (action === "getAdminSetupStatus") {
+    return json(getAdminSetupStatus_());
+  }
+
+  if (action === "validateAdminSession") {
+    return json(validateAdminSession_(e.parameter.adminToken));
+  }
+
+  const adminGetActions = [
+    "listKaryawanAdmin", "getDashboard", "getRiwayatAbsensiAdmin",
+    "getJadwalAdmin", "listIzinAdmin", "listPengumuman",
+    "getPayrollAdmin", "getPengaturanAdmin"
+  ];
+  if (adminGetActions.indexOf(action) !== -1) {
+    const auth = requireAdmin_(e.parameter.adminToken);
+    if (!auth.success) return json(auth);
+  }
+
   if (action === "listToko") {
     return json(listToko_());
   }
@@ -165,6 +183,26 @@ function doPost(e) {
 
   const action = String(data.action || "").trim();
 
+  if (action === "setupAdmin") {
+    return json(setupAdmin_(data));
+  }
+
+  if (action === "loginAdmin") {
+    return json(loginAdmin_(data));
+  }
+
+  const adminPostActions = [
+    "saveKaryawan", "setStatusKaryawan", "saveJadwalBatch",
+    "updateStatusIzin", "savePengumuman", "deletePengumuman",
+    "savePayrollBatch", "savePengaturanAdmin", "testWhatsApp",
+    "notifyPayroll", "sendPayrollEmail"
+  ];
+  if (adminPostActions.indexOf(action) !== -1) {
+    const auth = requireAdmin_(data.adminToken);
+    if (!auth.success) return json(auth);
+    data.adminUser = auth.admin.username;
+  }
+
   if (action === "absen") {
     return json(prosesAbsensi_(data));
   }
@@ -222,6 +260,10 @@ function doPost(e) {
     return json(updateProfilPortal_(data));
   }
 
+  if (action === "sendPayrollEmail") {
+    return json(sendPayrollEmail_(data));
+  }
+
   if (action === "notifyPayroll") {
     return json(notifyPayroll_(data));
   }
@@ -266,7 +308,7 @@ function getToko_(idToko) {
 
 function getKaryawanByBarcode_(barcode) {
   const sh = getSheet_(SHEET_KARYAWAN);
-  const rows = getRows_(sh, 10);
+  const rows = getRows_(sh, 11);
 
   const barcodeCari = String(barcode || "").trim();
 
@@ -290,7 +332,7 @@ function getKaryawanByBarcode_(barcode) {
 
 function getKaryawanByPin_(pin) {
   const sh = getSheet_(SHEET_KARYAWAN);
-  const rows = getRows_(sh, 10);
+  const rows = getRows_(sh, 11);
 
   const pinCari = String(pin || "").trim();
 
@@ -873,7 +915,7 @@ function getRiwayatAbsensi_(
 
 function getKaryawanById_(id) {
   const sh = getSheet_(SHEET_KARYAWAN);
-  const rows = getRows_(sh, 10);
+  const rows = getRows_(sh, 11);
 
   const row = rows.find(r =>
     String(r[0] || "").trim() === id
@@ -892,7 +934,8 @@ function mapKaryawan_(row) {
     status: String(row[6] || "").trim(),
     noHp: String(row[7] || "").trim(),
     foto: String(row[8] || "").trim(),
-    idToko: String(row[9] || "").trim()
+    idToko: String(row[9] || "").trim(),
+    email: String(row[10] || "").trim()
   };
 }
 
@@ -1444,7 +1487,7 @@ function listKaryawanAdmin_(filter) {
   const tokoMap = {};
   listToko_().items.forEach(toko => tokoMap[String(toko.id).trim()] = toko.nama);
 
-  const rows = getRows_(getSheet_(SHEET_KARYAWAN), 10);
+  const rows = getRows_(getSheet_(SHEET_KARYAWAN), 11);
   const items = rows
     .filter(row => String(row[0] || "").trim())
     .map(row => {
@@ -1483,7 +1526,8 @@ function listShift_() {
 
 function saveKaryawan_(data) {
   const sh = getSheet_(SHEET_KARYAWAN);
-  const rows = getRows_(sh, 10);
+  ensureKaryawanEmailColumn_();
+  const rows = getRows_(sh, 11);
 
   let id = String(data.id || "").trim();
   const isEdit = Boolean(id);
@@ -1496,7 +1540,11 @@ function saveKaryawan_(data) {
   const noHp = String(data.noHp || "").trim();
   const foto = String(data.foto || "").trim();
   const idToko = String(data.idToko || "").trim();
+  const email = String(data.email || "").trim().toLowerCase();
 
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { success: false, message: "Format email karyawan tidak valid." };
+  }
   if (!nama || !pin || !jabatan || !shiftDefault || !idToko) {
     return { success: false, message: "Nama, PIN, jabatan, shift, dan toko wajib diisi." };
   }
@@ -1532,9 +1580,9 @@ function saveKaryawan_(data) {
     return { success: false, message: "Barcode sudah digunakan oleh karyawan lain." };
   }
 
-  const values = [[id, barcode, nama, pin, jabatan, shiftDefault, status, noHp, foto, idToko]];
+  const values = [[id, barcode, nama, pin, jabatan, shiftDefault, status, noHp, foto, idToko, email]];
   if (isEdit) {
-    sh.getRange(rowIndex + 2, 1, 1, 10).setValues(values);
+    sh.getRange(rowIndex + 2, 1, 1, 11).setValues(values);
     simpanLog_(nama, "Memperbarui karyawan", `${id} | ${idToko} | ${status}`);
   } else {
     sh.appendRow(values[0]);
@@ -1544,7 +1592,7 @@ function saveKaryawan_(data) {
   return {
     success: true,
     message: isEdit ? "Data karyawan berhasil diperbarui." : "Karyawan berhasil ditambahkan.",
-    karyawan: { id, barcode, nama, jabatan, shiftDefault, status, noHp, foto, idToko }
+    karyawan: { id, barcode, nama, jabatan, shiftDefault, status, noHp, foto, idToko, email }
   };
 }
 
@@ -1840,7 +1888,8 @@ function getPayrollAdmin_(filter){
   const periode=`${tahun}-${String(bulan).padStart(2,"0")}`;
   const idToko=String(filter.idToko||"");
   const includePaid=String(filter.includePaid||"")==="1";
-  const karyawan=getRows_(getSheet_(SHEET_KARYAWAN),10).filter(r=>String(r[6]||"").toLowerCase()==="aktif"&&(!idToko||String(r[9]||"")===idToko));
+  ensureKaryawanEmailColumn_();
+  const karyawan=getRows_(getSheet_(SHEET_KARYAWAN),11).filter(r=>String(r[6]||"").toLowerCase()==="aktif"&&(!idToko||String(r[9]||"")===idToko));
   const abs=getRows_(getSheet_(SHEET_ABSENSI),15).filter(r=>{const d=new Date(r[0]);return !isNaN(d)&&d.getMonth()+1===bulan&&d.getFullYear()===tahun;});
   const sh=getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
   const saved=getRows_(sh,14).filter(r=>normalizePayrollPeriod_(r[0])===periode);
@@ -1851,7 +1900,7 @@ function getPayrollAdmin_(filter){
     const s=smap[id]||[];
     const pokok=Number(s[7])||0,tunj=Number(s[8])||0,pot=Number(s[9])||0;
     return {
-      periode,idKaryawan:id,nama:String(k[2]||""),idToko:String(k[9]||""),hadir:a.length,
+      periode,idKaryawan:id,nama:String(k[2]||""),idToko:String(k[9]||""),email:String(k[10]||""),hadir:a.length,
       terlambat:a.filter(r=>String(r[9]||"").toLowerCase().includes("terlambat")).length,
       totalDurasi:a.reduce((n,r)=>n+parseDurasiMenit_(r[14]),0),gajiPokok:pokok,tunjangan:tunj,potongan:pot,
       gajiBersih:pokok+tunj-pot,status:String(s[11]||"Draft"),catatan:String(s[12]||"")
@@ -1876,13 +1925,22 @@ function savePayrollBatch_(data){
   const sh=getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
   sh.getRange("A:A").setNumberFormat("@");
   const existing=getRows_(sh,14);
+  const emailResults=[];
   items.forEach(x=>{
     const periode=normalizePayrollPeriod_(x.periode);
-    const row=[periode,x.idKaryawan,x.nama,x.idToko,Number(x.hadir)||0,Number(x.terlambat)||0,Number(x.totalDurasi)||0,Number(x.gajiPokok)||0,Number(x.tunjangan)||0,Number(x.potongan)||0,(Number(x.gajiPokok)||0)+(Number(x.tunjangan)||0)-(Number(x.potongan)||0),String(x.status||"Draft"),String(x.catatan||""),new Date()];
     const idx=existing.findIndex(r=>normalizePayrollPeriod_(r[0])===periode&&String(r[1]||"").trim()===String(x.idKaryawan||"").trim());
+    const previousStatus=idx>=0?String(existing[idx][11]||"Draft"):"";
+    const status=String(x.status||"Draft");
+    const row=[periode,x.idKaryawan,x.nama,x.idToko,Number(x.hadir)||0,Number(x.terlambat)||0,Number(x.totalDurasi)||0,Number(x.gajiPokok)||0,Number(x.tunjangan)||0,Number(x.potongan)||0,(Number(x.gajiPokok)||0)+(Number(x.tunjangan)||0)-(Number(x.potongan)||0),status,String(x.catatan||""),new Date()];
     if(idx>=0)sh.getRange(idx+2,1,1,14).setValues([row]);else sh.appendRow(row);
+    if(status==="Dibayar"&&previousStatus!=="Dibayar"){
+      const result=sendPayrollEmail_({idKaryawan:x.idKaryawan,periode:periode,automatic:true});
+      emailResults.push({idKaryawan:x.idKaryawan,nama:x.nama,success:result.success,message:result.message});
+    }
   });
-  return{success:true,message:`${items.length} data payroll berhasil disimpan.`};
+  const sent=emailResults.filter(x=>x.success).length;
+  const skipped=emailResults.length-sent;
+  return{success:true,message:`${items.length} data payroll berhasil disimpan.${emailResults.length?` Email slip: ${sent} terkirim, ${skipped} belum terkirim.`:""}`,emailResults};
 }
 
 // ============================================================
@@ -1983,7 +2041,7 @@ function loginPortal_(data) {
 function sanitizePortalEmployee_(k) {
   return {
     id: k.id, nama: k.nama, jabatan: k.jabatan, shiftDefault: k.shiftDefault,
-    noHp: k.noHp, foto: k.foto, idToko: k.idToko, status: k.status
+    noHp: k.noHp, email: k.email, foto: k.foto, idToko: k.idToko, status: k.status
   };
 }
 
@@ -2090,10 +2148,13 @@ function updateProfilPortal_(data) {
   const k = verifyPortalToken_(data.token);
   if (!k) return portalAuthError_();
   const noHp = String(data.noHp || "").trim();
+  const email = String(data.email || "").trim().toLowerCase();
   const pinBaru = String(data.pinBaru || "").trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return {success:false,message:"Format email tidak valid."};
   if (pinBaru && !/^\d{4}$/.test(pinBaru)) return {success:false,message:"PIN baru harus 4 digit."};
   const sh = getSheet_(SHEET_KARYAWAN);
-  const rows = getRows_(sh,10);
+  ensureKaryawanEmailColumn_();
+  const rows = getRows_(sh,11);
   const idx = rows.findIndex(r => String(r[0] || "").trim() === k.id);
   if (idx < 0) return {success:false,message:"Karyawan tidak ditemukan."};
   if (pinBaru) {
@@ -2102,7 +2163,8 @@ function updateProfilPortal_(data) {
     sh.getRange(idx+2,4).setValue(pinBaru);
   }
   sh.getRange(idx+2,8).setValue(noHp);
-  simpanLog_(k.nama,"Memperbarui profil portal", pinBaru ? "Nomor HP dan PIN diperbarui" : "Nomor HP diperbarui");
+  sh.getRange(idx+2,11).setValue(email);
+  simpanLog_(k.nama,"Memperbarui profil portal", pinBaru ? "Kontak dan PIN diperbarui" : "Kontak diperbarui");
   return {success:true,message:"Profil berhasil diperbarui.",token:pinBaru ? makePortalToken_(k.id) : String(data.token)};
 }
 
@@ -2114,4 +2176,83 @@ function notifyPayroll_(data) {
   if (!k.noHp) return {success:false,message:"Nomor WhatsApp karyawan belum diisi."};
   const msg = `Halo ${k.nama}, slip gaji periode ${periode} sudah tersedia di Portal Karyawan EMS. Silakan login untuk melihat rinciannya.`;
   return kirimWhatsApp_(k.noHp, msg, null, []);
+}
+
+
+// ============================================================
+// ADMIN AUTH V9
+// Perlindungan server-side untuk seluruh endpoint administrasi.
+// ============================================================
+const ADMIN_SESSION_HOURS = 12;
+
+function adminProps_(){ return PropertiesService.getScriptProperties(); }
+function adminHash_(value){
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(value),Utilities.Charset.UTF_8)).replace(/=+$/g,"");
+}
+function getAdminSecret_(){
+  const p=adminProps_(); let s=p.getProperty("EMS_ADMIN_SECRET");
+  if(!s){s=Utilities.getUuid()+Utilities.getUuid();p.setProperty("EMS_ADMIN_SECRET",s);} return s;
+}
+function getAdminSetupStatus_(){
+  return {success:true,configured:Boolean(adminProps_().getProperty("EMS_ADMIN_USERNAME"))};
+}
+function setupAdmin_(data){
+  const p=adminProps_();
+  if(p.getProperty("EMS_ADMIN_USERNAME")) return {success:false,message:"Akun admin sudah dikonfigurasi."};
+  const username=String(data.username||"").trim(); const password=String(data.password||"");
+  if(username.length<4)return{success:false,message:"Username minimal 4 karakter."};
+  if(password.length<8)return{success:false,message:"Password minimal 8 karakter."};
+  const salt=Utilities.getUuid();
+  p.setProperties({EMS_ADMIN_USERNAME:username,EMS_ADMIN_SALT:salt,EMS_ADMIN_PASSWORD_HASH:adminHash_(salt+":"+password)});
+  simpanLog_(username,"Membuat akun admin","Konfigurasi keamanan admin pertama");
+  return loginAdmin_({username,password});
+}
+function loginAdmin_(data){
+  const p=adminProps_(); const username=String(data.username||"").trim(); const password=String(data.password||"");
+  const saved=p.getProperty("EMS_ADMIN_USERNAME")||""; const salt=p.getProperty("EMS_ADMIN_SALT")||""; const hash=p.getProperty("EMS_ADMIN_PASSWORD_HASH")||"";
+  if(!saved)return{success:false,setupRequired:true,message:"Akun admin belum dibuat."};
+  if(username!==saved||adminHash_(salt+":"+password)!==hash){simpanLog_(username,"Login admin gagal","Username atau password salah");return{success:false,message:"Username atau password salah."};}
+  const payload={username:saved,exp:Date.now()+ADMIN_SESSION_HOURS*3600000,nonce:Utilities.getUuid()};
+  const body=base64UrlEncode_(JSON.stringify(payload));
+  const sig=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(body,getAdminSecret_())).replace(/=+$/g,"");
+  simpanLog_(saved,"Login admin","Berhasil");
+  return{success:true,token:body+"."+sig,expiresInHours:ADMIN_SESSION_HOURS,username:saved};
+}
+function verifyAdminToken_(token){
+  try{const parts=String(token||"").split(".");if(parts.length!==2)return null;const expected=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(parts[0],getAdminSecret_())).replace(/=+$/g,"");if(expected!==parts[1])return null;const payload=JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());if(!payload.username||Number(payload.exp)<Date.now())return null;if(payload.username!==(adminProps_().getProperty("EMS_ADMIN_USERNAME")||""))return null;return payload;}catch(e){return null;}
+}
+function requireAdmin_(token){const admin=verifyAdminToken_(token);return admin?{success:true,admin}:{success:false,sessionExpired:true,message:"Sesi admin tidak valid atau sudah berakhir. Silakan login kembali."};}
+function validateAdminSession_(token){const r=requireAdmin_(token);return r.success?{success:true,username:r.admin.username}:r;}
+
+// ============================================================
+// EMAIL SLIP GAJI V9
+// Kolom K pada sheet Karyawan digunakan sebagai Email, tanpa menggeser kolom lama.
+// ============================================================
+function ensureKaryawanEmailColumn_(){
+  const sh=getSheet_(SHEET_KARYAWAN); if(sh.getMaxColumns()<11)sh.insertColumnsAfter(sh.getMaxColumns(),11-sh.getMaxColumns());
+  if(!String(sh.getRange(1,11).getDisplayValue()||"").trim())sh.getRange(1,11).setValue("Email");
+}
+function findPayrollRow_(idKaryawan,periode){
+  const sh=getOrCreateDataSheet_(SHEET_PAYROLL,["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
+  return getRows_(sh,14).find(r=>normalizePayrollPeriod_(r[0])===normalizePayrollPeriod_(periode)&&String(r[1]||"").trim()===String(idKaryawan||"").trim())||null;
+}
+function payrollEmailHtml_(k,row,periode){
+  const rup=n=>"Rp"+Number(n||0).toLocaleString("id-ID");
+  return `<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#111827"><h2>Slip Gaji ${periode}</h2><p>Halo <b>${escapeHtmlEmail_(k.nama)}</b>,</p><p>Berikut rincian slip gaji Anda.</p><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px;border-bottom:1px solid #ddd">Hadir</td><td style="text-align:right;border-bottom:1px solid #ddd">${Number(row[4])||0} hari</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd">Terlambat</td><td style="text-align:right;border-bottom:1px solid #ddd">${Number(row[5])||0} kali</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd">Gaji Pokok</td><td style="text-align:right;border-bottom:1px solid #ddd">${rup(row[7])}</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd">Tunjangan</td><td style="text-align:right;border-bottom:1px solid #ddd">${rup(row[8])}</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd">Potongan</td><td style="text-align:right;border-bottom:1px solid #ddd">${rup(row[9])}</td></tr><tr><td style="padding:12px 8px;font-weight:bold">Gaji Bersih</td><td style="padding:12px 0;text-align:right;font-size:20px;font-weight:bold">${rup(row[10])}</td></tr></table><p>Status: <b>${escapeHtmlEmail_(String(row[11]||"Draft"))}</b></p>${row[12]?`<p>Catatan: ${escapeHtmlEmail_(String(row[12]))}</p>`:""}<p>Slip ini juga tersedia di Portal Karyawan EMS.</p></div>`;
+}
+function escapeHtmlEmail_(s){return String(s||"").replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function sendPayrollEmail_(data){
+  ensureKaryawanEmailColumn_();
+  const id=String(data.idKaryawan||"").trim(); const periode=normalizePayrollPeriod_(data.periode);
+  const k=getKaryawanById_(id); if(!k)return{success:false,message:"Karyawan tidak ditemukan."};
+  if(!k.email)return{success:false,message:"Email karyawan belum diisi."};
+  const row=findPayrollRow_(id,periode); if(!row)return{success:false,message:"Data payroll tidak ditemukan."};
+  if(String(row[11]||"")!=="Dibayar")return{success:false,message:"Slip hanya dapat dikirim setelah status payroll Dibayar."};
+  const html=payrollEmailHtml_(k,row,periode);
+  const pdf=HtmlService.createHtmlOutput(html).getBlob().getAs(MimeType.PDF).setName(`Slip_Gaji_${k.id}_${periode}.pdf`);
+  try{
+    MailApp.sendEmail({to:k.email,subject:`Slip Gaji ${periode} - ${k.nama}`,htmlBody:html,body:`Slip gaji ${periode} tersedia.`,attachments:[pdf],name:"EMS Payroll"});
+    simpanLog_(String(data.adminUser||"Admin"),"Mengirim slip gaji email",`${k.nama} | ${k.email} | ${periode}`);
+    return{success:true,message:`Slip gaji berhasil dikirim ke ${k.email}.`};
+  }catch(error){return{success:false,message:`Gagal mengirim email: ${error.message}`};}
 }
