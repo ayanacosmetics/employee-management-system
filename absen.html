@@ -10,7 +10,10 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="js/config.js"></script>
-</head>
+<style>
+    .entry-gate{display:none;background:#fff;border:1px solid #e5e7eb;border-radius:24px;padding:26px;box-shadow:0 18px 50px rgba(15,23,42,.08);margin-top:18px}
+    .entry-gate.active{display:block}.entry-hero{display:flex;gap:16px;align-items:center;margin-bottom:20px}.entry-avatar{width:58px;height:58px;border-radius:18px;background:#ede9fe;color:#5b21b6;display:grid;place-items:center}.entry-avatar svg{width:28px;height:28px}.entry-hero h2{margin:0 0 5px}.entry-hero p{margin:0;color:#64748b}.entry-actions{display:grid;grid-template-columns:1fr 1fr;gap:14px}.entry-action{border:1px solid #e2e8f0;background:#fff;border-radius:18px;padding:20px;text-align:left;cursor:pointer;transition:.18s}.entry-action:hover{border-color:#7c3aed;transform:translateY(-1px);box-shadow:0 12px 28px rgba(124,58,237,.1)}.entry-action svg{width:25px;height:25px;color:#6d28d9}.entry-action b{display:block;font-size:17px;margin:12px 0 5px}.entry-action small{color:#64748b;line-height:1.5}.entry-status{margin-top:18px;padding:14px 16px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0;display:none}.entry-status.show{display:block}.entry-status b{display:block;margin-bottom:4px}.session-confirm{display:none;padding:16px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:16px;margin:16px 0}.session-confirm.show{display:block}.attendance-hidden{display:none!important}@media(max-width:650px){.entry-actions{grid-template-columns:1fr}.entry-gate{padding:20px}.entry-action{padding:17px}}
+  </style></head>
 
 <body class="attendance-page">
 
@@ -28,7 +31,19 @@
       </div>
     </header>
 
-    <section class="attendance-steps">
+    <section id="entryGate" class="entry-gate active">
+      <div class="entry-hero">
+        <div class="entry-avatar"><i data-lucide="building-2"></i></div>
+        <div><h2 id="entryTitle">Selamat Datang</h2><p id="entrySubtitle">Pilih layanan yang ingin digunakan.</p></div>
+      </div>
+      <div class="entry-actions">
+        <button class="entry-action" type="button" onclick="startAttendanceFlow()"><i data-lucide="scan-face"></i><b id="attendanceActionText">Absensi</b><small>Verifikasi lokasi dan selfie untuk absen masuk atau pulang.</small></button>
+        <button class="entry-action" type="button" onclick="openPortalFromGate()"><i data-lucide="layout-dashboard"></i><b>Buka Portal Karyawan</b><small>Jadwal, riwayat, izin/cuti, pengumuman, dan slip gaji.</small></button>
+      </div>
+      <div id="entryStatus" class="entry-status"><b id="entryStatusTitle">Status hari ini</b><span id="entryStatusText">Memeriksa sesi...</span></div>
+    </section>
+
+    <section id="attendanceSteps" class="attendance-steps attendance-hidden">
 
       <div class="attendance-step active" data-step="1">
         <span>1</span>
@@ -58,7 +73,7 @@
 
     </section>
 
-    <section class="attendance-card">
+    <section id="attendanceCard" class="attendance-card attendance-hidden">
 
       <!-- LANGKAH 1 -->
       <div id="stepLocation" class="attendance-content active">
@@ -205,6 +220,12 @@
           </div>
         </div>
 
+        <div id="sessionConfirm" class="session-confirm">
+          <b id="sessionEmployeeName">Karyawan</b>
+          <span>Identitas dikenali dari sesi Portal Karyawan. GPS dan selfie tetap diverifikasi.</span>
+        </div>
+
+        <div id="pinAuthArea">
         <div class="pin-display" id="pinDisplay">
           <span></span>
           <span></span>
@@ -230,6 +251,7 @@
           <button onclick="deletePin()">
             <i data-lucide="delete"></i>
           </button>
+        </div>
         </div>
 
         <button
@@ -310,6 +332,8 @@
     let currentShift = null;
     let currentEmployee = null;
     let shiftRequestToken = 0;
+    let currentPortalSession = null;
+    let portalHomeData = null;
 
     const params = new URLSearchParams(
         window.location.search
@@ -318,6 +342,100 @@
     const tokoId =
         params.get("toko") ||
         DEFAULT_TOKO_ID;
+
+    function readPortalSession() {
+      try {
+        const value = JSON.parse(localStorage.getItem("ems_portal_session") || "null");
+        return value && value.token ? value : null;
+      } catch (_) { return null; }
+    }
+
+    function showGate() {
+      document.getElementById("entryGate").classList.add("active");
+      document.getElementById("attendanceSteps").classList.add("attendance-hidden");
+      document.getElementById("attendanceCard").classList.add("attendance-hidden");
+      lucide.createIcons();
+    }
+
+    async function inspectPortalSession() {
+      currentPortalSession = readPortalSession();
+      const statusBox = document.getElementById("entryStatus");
+      if (!currentPortalSession) {
+        document.getElementById("entrySubtitle").innerText = "Pilih absensi atau masuk ke Portal Karyawan.";
+        return;
+      }
+      try {
+        const q = new URLSearchParams({ action: "getPortalHome", token: currentPortalSession.token, t: Date.now() });
+        const res = await fetch(`${EMS_API_URL}?${q}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || "Sesi tidak valid");
+        if (String(data.karyawan.idToko || "") !== String(tokoId || "")) {
+          document.getElementById("entrySubtitle").innerText = `Sesi ${data.karyawan.nama} aktif, tetapi terdaftar di toko lain.`;
+          return;
+        }
+        portalHomeData = data;
+        currentEmployee = data.karyawan;
+        currentShift = data.shift;
+        document.getElementById("entryTitle").innerText = `Halo, ${data.karyawan.nama}`;
+        document.getElementById("entrySubtitle").innerText = `${data.karyawan.jabatan || "Karyawan"} · ${data.toko?.nama || data.karyawan.idToko}`;
+        statusBox.classList.add("show");
+        const h = data.hariIni;
+        if (!h?.jamMasuk) {
+          document.getElementById("attendanceActionText").innerText = "Absen Masuk";
+          document.getElementById("entryStatusText").innerText = "Belum melakukan absensi masuk hari ini.";
+        } else if (!h?.jamPulang) {
+          document.getElementById("attendanceActionText").innerText = "Absen Pulang";
+          document.getElementById("entryStatusText").innerText = `Sudah masuk pukul ${h.jamMasuk}. Belum absen pulang.`;
+        } else {
+          document.getElementById("attendanceActionText").innerText = "Absensi Hari Ini Selesai";
+          document.getElementById("entryStatusText").innerText = `Masuk ${h.jamMasuk} · Pulang ${h.jamPulang}. Portal tetap dapat dibuka.`;
+        }
+      } catch (error) {
+        localStorage.removeItem("ems_portal_session");
+        currentPortalSession = null;
+        portalHomeData = null;
+        currentEmployee = null;
+        currentShift = null;
+        document.getElementById("entrySubtitle").innerText = "Sesi sebelumnya sudah tidak berlaku. Pilih absensi atau masuk portal dengan PIN.";
+      }
+      lucide.createIcons();
+    }
+
+    function startAttendanceFlow() {
+      if (portalHomeData?.hariIni?.jamMasuk && portalHomeData?.hariIni?.jamPulang) {
+        return Swal.fire({ icon: "info", title: "Absensi hari ini sudah lengkap", text: "Silakan buka Portal Karyawan untuk mengakses fitur lainnya.", confirmButtonText: "Buka Portal" }).then(r => { if (r.isConfirmed) openPortalFromGate(); });
+      }
+      document.getElementById("entryGate").classList.remove("active");
+      document.getElementById("attendanceSteps").classList.remove("attendance-hidden");
+      document.getElementById("attendanceCard").classList.remove("attendance-hidden");
+      showStep(1);
+    }
+
+    function openPortalFromGate() {
+      if (currentPortalSession?.token && portalHomeData) {
+        window.location.href = "portal.html";
+      } else {
+        window.location.href = `portal-login.html?toko=${encodeURIComponent(tokoId)}`;
+      }
+    }
+
+    function applySessionIdentity() {
+      const usingSession = Boolean(currentPortalSession?.token && portalHomeData && currentEmployee && currentShift);
+      document.getElementById("pinAuthArea").style.display = usingSession ? "none" : "block";
+      document.getElementById("sessionConfirm").classList.toggle("show", usingSession);
+      if (usingSession) {
+        document.getElementById("sessionEmployeeName").innerText = currentEmployee.nama;
+        document.getElementById("shiftName").innerText = currentShift.nama || "-";
+        document.getElementById("shiftStart").innerText = currentShift.masuk || "-";
+        document.getElementById("shiftEnd").innerText = currentShift.pulang || "-";
+        document.getElementById("shiftStatus").innerText = portalHomeData?.hariIni?.jamMasuk ? "Konfirmasi absen pulang" : "Konfirmasi absen masuk";
+        document.getElementById("submitAttendanceButton").innerHTML = '<i data-lucide="check-circle-2"></i> Konfirmasi Absensi';
+      } else {
+        document.getElementById("submitAttendanceButton").innerHTML = '<i data-lucide="check-circle-2"></i> Verifikasi dan Absen';
+      }
+      updateSubmitButton();
+      lucide.createIcons();
+    }
 
     function showStep(step) {
         currentStep = step;
@@ -794,11 +912,10 @@
         const selfieSiap =
             Boolean(selfieData);
 
-        const pinSiap =
-            currentPin.length === 4;
+        const sessionSiap = Boolean(currentPortalSession?.token && portalHomeData);
+        const pinSiap = sessionSiap || currentPin.length === 4;
 
-        const identitasSiap =
-            Boolean(currentEmployee && currentShift);
+        const identitasSiap = Boolean(currentEmployee && currentShift);
 
         button.disabled =
             !(gpsSiap && selfieSiap && pinSiap && identitasSiap);
@@ -856,10 +973,12 @@
       }
 
       showStep(3);
+      applySessionIdentity();
     }
 
     async function submitAttendance() {
-        if (currentPin.length !== 4) {
+        const usingPortalSession = Boolean(currentPortalSession?.token && portalHomeData && currentEmployee && currentShift);
+        if (!usingPortalSession && currentPin.length !== 4) {
         Swal.fire({
             icon: "warning",
             title: "PIN belum lengkap",
@@ -906,7 +1025,8 @@
         const payload = {
           action: "absen",
           idToko: tokoId,
-          pin: currentPin,
+          pin: usingPortalSession ? "" : currentPin,
+          portalToken: usingPortalSession ? currentPortalSession.token : "",
           latitude: currentLatitude,
           longitude: currentLongitude,
           accuracy: currentAccuracy,
@@ -975,6 +1095,7 @@
         // Buat sesi portal setelah absensi berhasil. Jika pembuatan sesi gagal,
         // absensi tetap dianggap berhasil dan fitur lama tidak terpengaruh.
         try {
+          if (!usingPortalSession) {
           const portalResponse = await fetch(EMS_API_URL, {
             method: "POST",
             headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -984,9 +1105,10 @@
           if (portalData.success && portalData.token) {
             localStorage.setItem("ems_portal_session", JSON.stringify({
               token: portalData.token,
-              expiresAt: Date.now() + (portalData.expiresInHours || 12) * 3600000,
+              persistent: true,
               karyawan: portalData.karyawan
             }));
+          }
           }
         } catch (portalError) {
           console.warn("Sesi portal tidak dapat dibuat:", portalError);
@@ -1064,10 +1186,11 @@
         ).disabled = true;
 
         updatePinDisplay();
-        showStep(1);
+        showGate();
+        inspectPortalSession();
     }
 
-    loadToko();
+    loadToko().then(inspectPortalSession);
     </script>
 
 </body>

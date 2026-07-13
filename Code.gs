@@ -448,6 +448,7 @@ function getShiftKaryawan_(idKaryawan, tanggalInput) {
 
 function prosesAbsensi_(data) {
   const pin = String(data.pin || "").trim();
+  const portalToken = String(data.portalToken || "").trim();
   const idToko = String(data.idToko || "").trim();
   const latitude = Number(data.latitude);
   const longitude = Number(data.longitude);
@@ -456,10 +457,10 @@ function prosesAbsensi_(data) {
     data.selfieBase64 || ""
   ).trim();
 
-  if (!pin || !idToko) {
+  if ((!pin && !portalToken) || !idToko) {
     return {
       success: false,
-      message: "PIN dan toko wajib diisi."
+      message: "Identitas karyawan dan toko wajib tersedia."
     };
   }
 
@@ -490,25 +491,22 @@ function prosesAbsensi_(data) {
     };
   }
 
-  // KONSEP FINAL:
-  // QR menentukan toko.
-  // PIN menentukan karyawan.
-  // Tidak memakai barcode karyawan ketika absen.
-  const hasilKaryawan =
-    getKaryawanByPin_(pin);
-
-  if (!hasilKaryawan.success) {
-    simpanLog_(
-      "",
-      "Absensi gagal",
-      hasilKaryawan.message
-    );
-
-    return hasilKaryawan;
+  // QR tetap menentukan toko. Identitas dapat dikonfirmasi dengan PIN lama
+  // atau token Portal V11 yang masih valid. GPS dan selfie tetap wajib.
+  let karyawan = null;
+  if (portalToken) {
+    karyawan = verifyPortalToken_(portalToken);
+    if (!karyawan) {
+      return { success: false, sessionExpired: true, message: "Sesi Portal Karyawan tidak valid. Masukkan PIN kembali." };
+    }
+  } else {
+    const hasilKaryawan = getKaryawanByPin_(pin);
+    if (!hasilKaryawan.success) {
+      simpanLog_("", "Absensi gagal", hasilKaryawan.message);
+      return hasilKaryawan;
+    }
+    karyawan = hasilKaryawan.karyawan;
   }
-
-  const karyawan =
-    hasilKaryawan.karyawan;
 
   const hasilToko =
     getToko_(idToko);
@@ -1984,7 +1982,7 @@ function parseDurasiMenit_(v){if(typeof v==="number")return v;const s=String(v||
 // PORTAL KARYAWAN V7
 // Seluruh fungsi di bawah bersifat tambahan dan tidak mengubah alur absensi lama.
 // ============================================================
-const PORTAL_SESSION_HOURS = 12;
+const PORTAL_SESSION_HOURS = 0; // V11: sesi portal aktif sampai logout, PIN berubah, atau akun dinonaktifkan
 
 function getPortalSecret_() {
   const props = PropertiesService.getScriptProperties();
@@ -2000,10 +1998,22 @@ function base64UrlEncode_(value) {
   return Utilities.base64EncodeWebSafe(String(value), Utilities.Charset.UTF_8).replace(/=+$/g, "");
 }
 
+function portalPinVersion_(karyawan) {
+  const id = String((karyawan && karyawan.id) || karyawan || "").trim();
+  const rows = getRows_(getSheet_(SHEET_KARYAWAN), 11);
+  const row = rows.find(r => String(r[0] || "").trim() === id);
+  const pin = row ? String(row[3] || "").trim() : "";
+  const raw = `${id}|${pin}`;
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, raw)).replace(/=+$/g, "");
+}
+
 function makePortalToken_(idKaryawan) {
+  const karyawan = getKaryawanById_(idKaryawan);
+  if (!karyawan) throw new Error("Karyawan tidak ditemukan.");
   const payload = {
     id: String(idKaryawan || "").trim(),
-    exp: Date.now() + PORTAL_SESSION_HOURS * 60 * 60 * 1000,
+    pv: portalPinVersion_(karyawan),
+    issuedAt: Date.now(),
     nonce: Utilities.getUuid()
   };
   const body = base64UrlEncode_(JSON.stringify(payload));
@@ -2023,9 +2033,13 @@ function verifyPortalToken_(token) {
     if (expected !== parts[1]) return null;
     const decoded = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString();
     const payload = JSON.parse(decoded);
-    if (!payload.id || Number(payload.exp) < Date.now()) return null;
+    if (!payload.id) return null;
+    // Token V7–V10 tetap didukung sampai waktu kedaluwarsanya.
+    if (payload.exp && Number(payload.exp) < Date.now()) return null;
     const karyawan = getKaryawanById_(payload.id);
     if (!karyawan || String(karyawan.status || "").toLowerCase() !== "aktif") return null;
+    // Token V11 otomatis tidak berlaku saat PIN diubah.
+    if (payload.pv && payload.pv !== portalPinVersion_(karyawan)) return null;
     return karyawan;
   } catch (error) {
     return null;
@@ -2038,6 +2052,7 @@ function portalAuthError_() {
 
 function loginPortal_(data) {
   const pin = String(data.pin || "").trim();
+  const portalToken = String(data.portalToken || "").trim();
   const idToko = String(data.idToko || "").trim();
   const result = getKaryawanByPin_(pin);
   if (!result.success) return result;
@@ -2048,7 +2063,8 @@ function loginPortal_(data) {
   return {
     success: true,
     token: makePortalToken_(k.id),
-    expiresInHours: PORTAL_SESSION_HOURS,
+    persistent: true,
+    expiresInHours: 0,
     karyawan: sanitizePortalEmployee_(k)
   };
 }
@@ -2347,17 +2363,17 @@ function sendPayrollEmail_(data){
 
 
 // ============================================================
-// EMS V9.1 STABILITY UPDATE
+// EMS V11 SMART ENTRY & UNIFIED PORTAL
 // Migrasi ringan dan pemeriksaan struktur tanpa menghapus data lama.
 // ============================================================
 function ensureSystemSchema_() {
   const cache = CacheService.getScriptCache();
-  if (cache.get("EMS_SCHEMA_V10_OK") === "1") return;
+  if (cache.get("EMS_SCHEMA_V11_OK") === "1") return;
 
   const lock = LockService.getScriptLock();
   try {
     lock.tryLock(5000);
-    if (cache.get("EMS_SCHEMA_V10_OK") === "1") return;
+    if (cache.get("EMS_SCHEMA_V11_OK") === "1") return;
 
     ensureKaryawanEmailColumn_();
     ensureSheetHeader_(SHEET_PAYROLL, ["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
@@ -2367,7 +2383,7 @@ function ensureSystemSchema_() {
     ensureSheetHeader_(SHEET_ADMIN, ["Username","Password Hash","Salt","Nama","Role","Status","Version","Dibuat Pada","Login Terakhir"]);
     migrateLegacyAdmin_();
 
-    cache.put("EMS_SCHEMA_V10_OK", "1", 300);
+    cache.put("EMS_SCHEMA_V11_OK", "1", 300);
   } catch (error) {
     console.error("Migrasi schema V9.1 dilewati:", error);
   } finally {
@@ -2423,7 +2439,7 @@ function getSystemHealth_() {
 
   return {
     success: true,
-    version: "10.0",
+    version: "11.0",
     timezone: Session.getScriptTimeZone(),
     adminConfigured: getAdminSetupStatus_().configured,
     emailQuota,
