@@ -4,278 +4,228 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dashboard - EMS</title>
-
   <link rel="stylesheet" href="css/style.css">
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
-
 <body>
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-logo">E</div>
-      <div>
-        <h2>EMS</h2>
-        <small>Employee Management System</small>
-      </div>
+      <div><h2>EMS</h2><small>Employee Management System</small></div>
     </div>
-
     <nav>
-      <a class="active" href="index.html">
-        <i data-lucide="layout-dashboard"></i>
-        Dashboard
-      </a>
-
-      <a href="karyawan.html">
-        <i data-lucide="users"></i>
-        Karyawan
-      </a>
-
-      <a href="absen.html">
-        <i data-lucide="scan-line"></i>
-        Absensi
-      </a>
-
-      <a href="shift.html">
-        <i data-lucide="calendar-clock"></i>
-        Jadwal Shift
-      </a>
-
-      <a href="izin.html">
-        <i data-lucide="file-text"></i>
-        Izin & Cuti
-      </a>
-
-      <a href="rekap.html">
-        <i data-lucide="bar-chart-3"></i>
-        Rekap Absensi
-      </a>
-
-      <a href="qr-toko.html">
-        <i data-lucide="qr-code"></i>
-        QR Absensi Toko
-      </a>
-
-      <a href="pengaturan.html">
-        <i data-lucide="settings"></i>
-        Pengaturan
-      </a>
+      <a class="active" href="index.html"><i data-lucide="layout-dashboard"></i>Dashboard</a>
+      <a href="karyawan.html"><i data-lucide="users"></i>Karyawan</a>
+      <a href="absen.html"><i data-lucide="scan-line"></i>Absensi</a>
+      <a href="shift.html"><i data-lucide="calendar-clock"></i>Jadwal Shift</a>
+      <a href="izin.html"><i data-lucide="file-text"></i>Izin & Cuti</a>
+      <a href="rekap.html"><i data-lucide="bar-chart-3"></i>Rekap Absensi</a>
+      <a href="qr-toko.html"><i data-lucide="qr-code"></i>QR Absensi Toko</a>
+      <a href="pengaturan.html"><i data-lucide="settings"></i>Pengaturan</a>
     </nav>
   </aside>
 
-  <main class="main">
-    <header class="header">
+  <main class="main dashboard-main">
+    <header class="header dashboard-header">
       <div>
-        <h1>Dashboard</h1>
-        <p>Selamat datang kembali</p>
+        <h1>Dashboard Admin</h1>
+        <p id="dashboardSubtitle">Ringkasan kehadiran hari ini</p>
       </div>
-
-      <select
-        id="filterToko"
-        class="dashboard-store-filter"
-        onchange="loadDashboard()"
-      >
-        <option value="">Semua Toko</option>
-      </select>
-
-      <button class="icon-button">
-        <i data-lucide="bell"></i>
-      </button>
+      <div class="dashboard-header-actions">
+        <input id="filterTanggal" class="dashboard-date-filter" type="date" onchange="loadDashboard()">
+        <select id="filterToko" class="dashboard-store-filter" onchange="loadDashboard()">
+          <option value="">Semua Toko</option>
+        </select>
+        <button id="refreshDashboard" class="dashboard-refresh-button" type="button" onclick="loadDashboard(true)">
+          <i data-lucide="refresh-cw"></i><span>Perbarui</span>
+        </button>
+      </div>
     </header>
 
-    <section class="summary-grid">
-      <article class="summary-card">
-        <span class="summary-icon green">
-          <i data-lucide="user-check"></i>
-        </span>
-        <div>
-          <small>Hadir</small>
-          <strong id="jumlahHadir">0</strong>
-        </div>
-      </article>
+    <div class="dashboard-live-strip">
+      <span class="dashboard-live-dot"></span>
+      <span>Data diperbarui otomatis setiap 30 detik</span>
+      <small id="lastUpdated">Belum diperbarui</small>
+    </div>
 
-      <article class="summary-card">
-        <span class="summary-icon orange">
-          <i data-lucide="clock"></i>
-        </span>
-        <div>
-          <small>Terlambat</small>
-          <strong id="jumlahTerlambat">0</strong>
-        </div>
-      </article>
-
-      <article class="summary-card">
-        <span class="summary-icon red">
-          <i data-lucide="user-x"></i>
-        </span>
-        <div>
-          <small>Belum Hadir</small>
-          <strong id="jumlahBelumHadir">0</strong>
-        </div>
-      </article>
-
-      <article class="summary-card">
-        <span class="summary-icon blue">
-          <i data-lucide="briefcase-business"></i>
-        </span>
-        <div>
-          <small>Sedang Bekerja</small>
-          <strong id="jumlahSedangBekerja">0</strong>
-        </div>
-      </article>
+    <section class="dashboard-summary-grid">
+      <article class="summary-card"><span class="summary-icon purple-summary"><i data-lucide="users"></i></span><div><small>Karyawan Aktif</small><strong id="jumlahKaryawan">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon green"><i data-lucide="user-check"></i></span><div><small>Sudah Masuk</small><strong id="jumlahHadir">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon blue"><i data-lucide="briefcase-business"></i></span><div><small>Sedang Bekerja</small><strong id="jumlahSedangBekerja">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon cyan-summary"><i data-lucide="log-out"></i></span><div><small>Sudah Pulang</small><strong id="jumlahPulang">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon red"><i data-lucide="user-x"></i></span><div><small>Belum Hadir</small><strong id="jumlahBelumHadir">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon orange"><i data-lucide="clock-3"></i></span><div><small>Terlambat</small><strong id="jumlahTerlambat">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon yellow-summary"><i data-lucide="file-clock"></i></span><div><small>Izin Menunggu</small><strong id="jumlahIzin">0</strong></div></article>
+      <article class="summary-card"><span class="summary-icon pink-summary"><i data-lucide="heart-pulse"></i></span><div><small>Sakit</small><strong id="jumlahSakit">0</strong></div></article>
     </section>
 
-    <section class="content-grid">
-      <article class="panel">
-        <h3>Ringkasan Kehadiran Hari Ini</h3>
-        <div class="placeholder">
-          Grafik kehadiran
+    <section class="dashboard-layout">
+      <article class="panel dashboard-overview-panel">
+        <div class="dashboard-panel-heading"><div><h3>Ringkasan Kehadiran</h3><p>Perbandingan status karyawan pada tanggal terpilih</p></div></div>
+        <div class="dashboard-overview-content">
+          <div id="attendanceDonut" class="attendance-donut" style="--attendance-percent:0">
+            <div><strong id="persenHadir">0%</strong><span>Kehadiran</span></div>
+          </div>
+          <div class="dashboard-legend">
+            <div><span class="legend-dot legend-present"></span><span>Sudah masuk</span><strong id="legendHadir">0</strong></div>
+            <div><span class="legend-dot legend-working"></span><span>Sedang bekerja</span><strong id="legendBekerja">0</strong></div>
+            <div><span class="legend-dot legend-home"></span><span>Sudah pulang</span><strong id="legendPulang">0</strong></div>
+            <div><span class="legend-dot legend-absent"></span><span>Belum hadir</span><strong id="legendBelum">0</strong></div>
+          </div>
         </div>
       </article>
 
-      <article class="panel">
-        <h3>Karyawan Terbaru Absen</h3>
-
-        <div
-          class="attendance-list"
-          id="attendanceLatest"
-        >
-          <p>Memuat data...</p>
-        </div>
+      <article class="panel dashboard-activity-panel">
+        <div class="dashboard-panel-heading"><div><h3>Aktivitas Terbaru</h3><p>Absensi masuk dan pulang terbaru</p></div><a href="rekap.html">Lihat riwayat</a></div>
+        <div class="attendance-list dashboard-activity-list" id="attendanceLatest"><p>Memuat data...</p></div>
       </article>
 
-      <article class="panel">
-        <h3>QR Absensi Toko</h3>
+      <article class="panel dashboard-not-present-panel">
+        <div class="dashboard-panel-heading"><div><h3>Belum Hadir</h3><p>Karyawan aktif yang belum absen masuk</p></div><span id="belumHadirBadge" class="dashboard-count-badge">0</span></div>
+        <div id="notPresentList" class="dashboard-employee-list"><p>Memuat data...</p></div>
+      </article>
 
-        <p>
-            Lihat dan cetak QR absensi untuk setiap toko.
-        </p>
-
-        <a class="qr-dashboard-button" href="qr-toko.html">
-            <i data-lucide="qr-code"></i>
-            Buka QR Toko
-        </a>
+      <article class="panel dashboard-quick-panel">
+        <div class="dashboard-panel-heading"><div><h3>Akses Cepat</h3><p>Menu yang sering digunakan</p></div></div>
+        <div class="dashboard-quick-links">
+          <a href="rekap.html"><i data-lucide="history"></i><span><b>Riwayat Absensi</b><small>Lihat dan filter seluruh absensi</small></span></a>
+          <a href="qr-toko.html"><i data-lucide="qr-code"></i><span><b>QR Absensi Toko</b><small>Lihat dan cetak QR toko</small></span></a>
+          <a href="izin.html"><i data-lucide="file-check-2"></i><span><b>Izin & Cuti</b><small>Kelola pengajuan karyawan</small></span></a>
+        </div>
       </article>
     </section>
   </main>
 
   <script src="js/config.js"></script>
-
   <script>
+    let dashboardTimer = null;
 
-   async function loadDaftarToko() {
-    const select =
-        document.getElementById("filterToko");
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
+    }
 
-    try {
-        const response = await fetch(
-        `${EMS_API_URL}?action=listToko`
-        );
+    function getLocalDateValue() {
+      const now = new Date();
+      const offset = now.getTimezoneOffset();
+      return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10);
+    }
 
+    function formatSelectedDate(value) {
+      if (!value) return "hari ini";
+      const date = new Date(`${value}T00:00:00`);
+      return new Intl.DateTimeFormat("id-ID", { weekday:"long", day:"numeric", month:"long", year:"numeric" }).format(date);
+    }
+
+    async function loadDaftarToko() {
+      const select = document.getElementById("filterToko");
+      try {
+        const response = await fetch(`${EMS_API_URL}?action=listToko`);
         const data = await response.json();
-
-        if (!data.success) {
-         throw new Error(
-            data.message || "Daftar toko gagal dimuat."
-         );
-        }
-
-        select.innerHTML =
-          `<option value="">Semua Toko</option>`;
-
-        data.items.forEach(toko => {
-          const option =
-            document.createElement("option");
-
+        if (!data.success) throw new Error(data.message || "Daftar toko gagal dimuat.");
+        select.innerHTML = `<option value="">Semua Toko</option>`;
+        (data.items || []).forEach(toko => {
+          const option = document.createElement("option");
           option.value = toko.id;
           option.textContent = toko.nama;
-
           select.appendChild(option);
         });
-
       } catch (error) {
-        console.error(
-          "Gagal memuat daftar toko:",
-          error
-        );
+        console.error("Gagal memuat daftar toko:", error);
       }
     }
 
-    async function loadDashboard() {
-      const filterToko =
-        document.getElementById("filterToko").value;
+    function setSummary(summary) {
+      const values = {
+        jumlahKaryawan: summary.totalKaryawan,
+        jumlahHadir: summary.hadir,
+        jumlahSedangBekerja: summary.sedangBekerja,
+        jumlahPulang: summary.pulang,
+        jumlahBelumHadir: summary.belumHadir,
+        jumlahTerlambat: summary.terlambat,
+        jumlahIzin: summary.izinMenunggu,
+        jumlahSakit: summary.sakit
+      };
+      Object.entries(values).forEach(([id, value]) => document.getElementById(id).textContent = Number(value) || 0);
 
-      const latest =
-        document.getElementById("attendanceLatest");
+      const total = Number(summary.totalKaryawan) || 0;
+      const hadir = Number(summary.hadir) || 0;
+      const persen = total ? Math.round((hadir / total) * 100) : 0;
+      document.getElementById("persenHadir").textContent = `${persen}%`;
+      document.getElementById("attendanceDonut").style.setProperty("--attendance-percent", persen);
+      document.getElementById("legendHadir").textContent = hadir;
+      document.getElementById("legendBekerja").textContent = Number(summary.sedangBekerja) || 0;
+      document.getElementById("legendPulang").textContent = Number(summary.pulang) || 0;
+      document.getElementById("legendBelum").textContent = Number(summary.belumHadir) || 0;
+      document.getElementById("belumHadirBadge").textContent = Number(summary.belumHadir) || 0;
+    }
 
-      const url =
-        `${EMS_API_URL}?action=getDashboard` +
-        `&idToko=${encodeURIComponent(filterToko)}`;
+    function renderActivities(items) {
+      const latest = document.getElementById("attendanceLatest");
+      if (!items.length) {
+        latest.innerHTML = `<div class="dashboard-empty"><i data-lucide="inbox"></i><span>Belum ada aktivitas absensi.</span></div>`;
+        return;
+      }
+      latest.innerHTML = items.map(item => {
+        const isOut = String(item.jenis).toUpperCase() === "PULANG";
+        return `<div class="dashboard-activity-item">
+          <span class="dashboard-activity-icon ${isOut ? "out" : "in"}"><i data-lucide="${isOut ? "log-out" : "log-in"}"></i></span>
+          <span class="dashboard-activity-copy"><b>${escapeHtml(item.nama || "-")}</b><small>${escapeHtml(item.namaToko || "")} · ${escapeHtml(item.jenis || "MASUK")}</small></span>
+          <span class="dashboard-activity-meta"><b>${escapeHtml(item.jam || "-")}</b><small>${escapeHtml(item.status || "-")}</small></span>
+        </div>`;
+      }).join("");
+    }
 
+    function renderNotPresent(items) {
+      const container = document.getElementById("notPresentList");
+      if (!items.length) {
+        container.innerHTML = `<div class="dashboard-empty success"><i data-lucide="circle-check-big"></i><span>Semua karyawan sudah hadir.</span></div>`;
+        return;
+      }
+      container.innerHTML = items.map(item => `<div class="dashboard-employee-item">
+        <span class="dashboard-avatar">${escapeHtml((item.nama || "?").trim().charAt(0).toUpperCase())}</span>
+        <span><b>${escapeHtml(item.nama || "-")}</b><small>${escapeHtml(item.jabatan || "Karyawan")} · ${escapeHtml(item.namaToko || item.idToko || "-")}</small></span>
+        <em>${escapeHtml(item.shift || "-")}</em>
+      </div>`).join("");
+    }
+
+    async function loadDashboard(manual = false) {
+      const button = document.getElementById("refreshDashboard");
+      const tanggal = document.getElementById("filterTanggal").value;
+      const idToko = document.getElementById("filterToko").value;
+      document.getElementById("dashboardSubtitle").textContent = `Ringkasan kehadiran ${formatSelectedDate(tanggal)}`;
+      if (manual) button.classList.add("loading");
+
+      const params = new URLSearchParams({ action:"getDashboard", tanggal, idToko });
       try {
-        latest.innerHTML = "<p>Memuat data...</p>";
-
-        const response = await fetch(url);
+        const response = await fetch(`${EMS_API_URL}?${params.toString()}&t=${Date.now()}`, { cache:"no-store" });
         const data = await response.json();
-
-        if (!data.success) {
-          throw new Error(
-            data.message || "Dashboard gagal dimuat."
-          );
-        }
-
-        const summary = data.summary || {};
-
-        document.getElementById("jumlahHadir").innerText =
-          summary.hadir || 0;
-
-        document.getElementById("jumlahTerlambat").innerText =
-          summary.terlambat || 0;
-
-        document.getElementById("jumlahBelumHadir").innerText =
-          summary.belumHadir || 0;
-
-        document.getElementById("jumlahSedangBekerja").innerText =
-          summary.sedangBekerja || 0;
-
-        const items = data.terbaru || [];
-
-        if (items.length === 0) {
-          latest.innerHTML =
-            "<p>Belum ada karyawan yang absen hari ini.</p>";
-
-          return;
-        }
-
-        latest.innerHTML = items.map(item => `
-          <div>
-            <span>
-              <b>${item.nama || "-"}</b>
-
-              <small class="attendance-store-name">
-                ${item.namaToko || ""}
-              </small>
-            </span>
-
-            <small>
-              ${item.jamMasuk || "-"}
-            </small>
-          </div>
-        `).join("");
-
+        if (!data.success) throw new Error(data.message || "Dashboard gagal dimuat.");
+        setSummary(data.summary || {});
+        renderActivities(data.aktivitasTerbaru || data.terbaru || []);
+        renderNotPresent(data.belumHadirItems || []);
+        document.getElementById("lastUpdated").textContent = `Terakhir diperbarui ${new Date().toLocaleTimeString("id-ID", {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
+        lucide.createIcons();
       } catch (error) {
-        latest.innerHTML =
-          `<p>Gagal memuat data: ${error.message}</p>`;
-
+        document.getElementById("attendanceLatest").innerHTML = `<div class="dashboard-empty error"><i data-lucide="triangle-alert"></i><span>${escapeHtml(error.message)}</span></div>`;
         console.error(error);
+        lucide.createIcons();
+      } finally {
+        button.classList.remove("loading");
       }
     }
 
     async function initDashboard() {
-        await loadDaftarToko();
-        await loadDashboard();
-        lucide.createIcons();
+      document.getElementById("filterTanggal").value = getLocalDateValue();
+      await loadDaftarToko();
+      await loadDashboard();
+      lucide.createIcons();
+      dashboardTimer = setInterval(() => loadDashboard(false), 30000);
     }
 
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) loadDashboard(false);
+    });
+    window.addEventListener("beforeunload", () => clearInterval(dashboardTimer));
     initDashboard();
   </script>
 </body>

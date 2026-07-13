@@ -576,99 +576,129 @@ function saveIzin_(data) {
 }
 
 function getDashboard_(tanggalInput, idTokoInput) {
-  const tanggal =
-    parseTanggal_(tanggalInput) ||
-    todayDate_();
+  const tanggal = parseTanggal_(tanggalInput) || todayDate_();
+  const idToko = String(idTokoInput || "").trim();
 
-  const idToko = String(
-    idTokoInput || ""
-  ).trim();
+  const tokoMap = {};
+  getRows_(getSheet_(SHEET_TOKO), 6).forEach(row => {
+    const id = String(row[0] || "").trim();
+    if (id) tokoMap[id] = String(row[1] || "").trim();
+  });
 
-  const shKaryawan =
-    getSheet_(SHEET_KARYAWAN);
-
-  let karyawanAktif = getRows_(
-    shKaryawan,
-    10
-  ).filter(row =>
-    String(row[6] || "")
-      .trim()
-      .toLowerCase() === "aktif"
-  );
+  let karyawanAktif = getRows_(getSheet_(SHEET_KARYAWAN), 10)
+    .filter(row => String(row[6] || "").trim().toLowerCase() === "aktif");
 
   if (idToko) {
-    karyawanAktif = karyawanAktif.filter(
-      row =>
-        String(row[9] || "").trim() === idToko
+    karyawanAktif = karyawanAktif.filter(row =>
+      String(row[9] || "").trim() === idToko
     );
   }
 
-  const shAbsensi =
-    getSheet_(SHEET_ABSENSI);
-
-  let absensiHariIni = getRows_(
-    shAbsensi,
-    15
-  ).filter(row =>
-    normalizeDate_(row[0]) ===
-    normalizeDate_(tanggal)
-  );
+  let absensiHariIni = getRows_(getSheet_(SHEET_ABSENSI), 15)
+    .filter(row => normalizeDate_(row[0]) === normalizeDate_(tanggal));
 
   if (idToko) {
-    absensiHariIni = absensiHariIni.filter(
-      row =>
-        String(row[3] || "").trim() === idToko
+    absensiHariIni = absensiHariIni.filter(row =>
+      String(row[3] || "").trim() === idToko
     );
   }
 
-  const hadir = absensiHariIni.length;
+  let izinHariIni = getRows_(getSheet_(SHEET_IZIN), 7)
+    .filter(row => normalizeDate_(row[0]) === normalizeDate_(tanggal));
 
-  const terlambat =
-    absensiHariIni.filter(row =>
-      String(row[9] || "")
-        .toLowerCase()
-        .includes("terlambat")
-    ).length;
+  if (idToko) {
+    izinHariIni = izinHariIni.filter(row =>
+      String(row[3] || "").trim() === idToko
+    );
+  }
 
-  const pulang =
-    absensiHariIni.filter(row =>
-      Boolean(row[10])
-    ).length;
+  const hadirIds = new Set(absensiHariIni.map(row => String(row[1] || "").trim()));
+  const hadir = hadirIds.size;
+  const terlambat = absensiHariIni.filter(row =>
+    String(row[9] || "").toLowerCase().includes("terlambat")
+  ).length;
+  const pulang = absensiHariIni.filter(row => Boolean(row[10])).length;
+  const sedangBekerja = absensiHariIni.filter(row => Boolean(row[6]) && !row[10]).length;
+  const belumHadirItems = karyawanAktif
+    .filter(row => !hadirIds.has(String(row[0] || "").trim()))
+    .map(row => ({
+      id: String(row[0] || "").trim(),
+      nama: String(row[2] || "").trim(),
+      jabatan: String(row[4] || "").trim(),
+      shift: String(row[5] || "").trim(),
+      idToko: String(row[9] || "").trim(),
+      namaToko: tokoMap[String(row[9] || "").trim()] || ""
+    }));
 
-  const sedangBekerja =
-    absensiHariIni.filter(row =>
-      Boolean(row[6]) && !row[10]
-    ).length;
+  const izinMenunggu = izinHariIni.filter(row =>
+    String(row[6] || "").trim().toLowerCase() === "menunggu"
+  ).length;
+  const sakit = izinHariIni.filter(row =>
+    String(row[4] || "").trim().toLowerCase().includes("sakit") &&
+    String(row[6] || "").trim().toLowerCase() !== "ditolak"
+  ).length;
 
-  const belumHadir = Math.max(
-    0,
-    karyawanAktif.length - hadir
-  );
+  const aktivitasTerbaru = [];
+  absensiHariIni.forEach(row => {
+    if (row[6]) {
+      aktivitasTerbaru.push({
+        id: String(row[1] || "").trim(),
+        nama: String(row[2] || "").trim(),
+        idToko: String(row[3] || "").trim(),
+        namaToko: String(row[4] || "").trim(),
+        shift: String(row[5] || "").trim(),
+        jenis: "MASUK",
+        jam: formatJam_(row[6]),
+        status: String(row[9] || "").trim(),
+        waktuSort: new Date(row[6]).getTime() || 0
+      });
+    }
+    if (row[10]) {
+      aktivitasTerbaru.push({
+        id: String(row[1] || "").trim(),
+        nama: String(row[2] || "").trim(),
+        idToko: String(row[3] || "").trim(),
+        namaToko: String(row[4] || "").trim(),
+        shift: String(row[5] || "").trim(),
+        jenis: "PULANG",
+        jam: formatJam_(row[10]),
+        status: String(row[13] || "").trim(),
+        waktuSort: new Date(row[10]).getTime() || 0
+      });
+    }
+  });
+
+  aktivitasTerbaru.sort((a, b) => b.waktuSort - a.waktuSort);
 
   return {
     success: true,
-
+    tanggal: normalizeDate_(tanggal),
     summary: {
       totalKaryawan: karyawanAktif.length,
       hadir,
       terlambat,
-      belumHadir,
+      belumHadir: belumHadirItems.length,
       sedangBekerja,
-      pulang
+      pulang,
+      izinMenunggu,
+      sakit
     },
+    aktivitasTerbaru: aktivitasTerbaru.slice(0, 12).map(item => {
+      delete item.waktuSort;
+      return item;
+    }),
+    belumHadirItems: belumHadirItems.slice(0, 20),
 
-    terbaru: absensiHariIni
-      .slice(-10)
-      .reverse()
-      .map(row => ({
-        id: row[1],
-        nama: row[2],
-        idToko: row[3],
-        namaToko: row[4],
-        shift: row[5],
-        jamMasuk: formatJam_(row[6]),
-        status: row[9]
-      }))
+    // Tetap dipertahankan agar halaman lama yang memakai `terbaru` tidak rusak.
+    terbaru: absensiHariIni.slice(-10).reverse().map(row => ({
+      id: row[1],
+      nama: row[2],
+      idToko: row[3],
+      namaToko: row[4],
+      shift: row[5],
+      jamMasuk: formatJam_(row[6]),
+      status: row[9]
+    }))
   };
 }
 
