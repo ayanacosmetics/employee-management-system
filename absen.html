@@ -156,6 +156,16 @@
             Foto Ulang
           </button>
 
+          <button
+            id="continuePinButton"
+            class="attendance-primary"
+            onclick="lanjutKePin()"
+            style="display:none"
+          >
+            <i data-lucide="arrow-right"></i>
+            Lanjut ke PIN
+          </button>
+
         </div>
 
       </div>
@@ -281,9 +291,6 @@
     const tokoId =
         params.get("toko") ||
         DEFAULT_TOKO_ID;
-
-    const employeeBarcode =
-        String(params.get("barcode") || "").trim();
 
     function showStep(step) {
         currentStep = step;
@@ -546,7 +553,15 @@
         video.srcObject = cameraStream;
 
         document.getElementById(
-            "captureButton"
+          "cameraButton"
+        ).style.display = "none";
+
+        document.getElementById(
+          "captureButton"
+        ).style.display = "inline-flex";
+
+        document.getElementById(
+          "captureButton"
         ).disabled = false;
 
         } catch (error) {
@@ -559,72 +574,77 @@
     }
 
     function captureSelfie() {
-        const video =
-        document.getElementById(
-            "cameraVideo"
-        );
+      const video =
+        document.getElementById("cameraVideo");
 
-        const canvas =
-        document.getElementById(
-            "cameraCanvas"
-        );
+      const canvas =
+        document.getElementById("cameraCanvas");
 
-        const preview =
-        document.getElementById(
-            "selfiePreview"
-        );
+      const preview =
+        document.getElementById("selfiePreview");
 
-        if (
-        !video.videoWidth ||
-        !video.videoHeight
-        ) {
+      if (!video.videoWidth || !video.videoHeight) {
         Swal.fire({
-            icon: "warning",
-            title: "Kamera belum siap",
-            text:
-            "Tunggu beberapa detik lalu coba lagi."
+          icon: "warning",
+          title: "Kamera belum siap",
+          text: "Tunggu beberapa detik lalu coba lagi."
         });
 
         return;
-        }
+      }
 
-        canvas.width = 720;
-        canvas.height = 960;
+      canvas.width = 720;
+      canvas.height = 960;
 
-        const context =
+      const context =
         canvas.getContext("2d");
 
-        context.drawImage(
+      context.drawImage(
         video,
         0,
         0,
         canvas.width,
         canvas.height
-        );
+      );
 
-        selfieData =
+      selfieData =
         canvas.toDataURL(
-            "image/jpeg",
-            0.72
+          "image/jpeg",
+          0.72
         );
 
-        document.getElementById(
-          "retakeButton"
-        ).style.display = "inline-flex";
+      // Tampilkan hasil selfie
+      preview.src = selfieData;
+      preview.style.display = "block";
+      video.style.display = "none";
 
-        updateSubmitButton();
+      // Atur tombol setelah selfie diambil
+      document.getElementById(
+        "cameraButton"
+      ).style.display = "none";
 
-        if (cameraStream) {
+      document.getElementById(
+        "captureButton"
+      ).style.display = "none";
+
+      document.getElementById(
+        "retakeButton"
+      ).style.display = "inline-flex";
+
+      document.getElementById(
+        "continuePinButton"
+      ).style.display = "inline-flex";
+
+      if (cameraStream) {
         cameraStream
-            .getTracks()
-            .forEach(track => track.stop());
+          .getTracks()
+          .forEach(track => track.stop());
 
         cameraStream = null;
-        }
+      }
 
-        setTimeout(() => {
-        showStep(3);
-        }, 600);
+      updateSubmitButton();
+      lucide.createIcons();
     }
 
     function inputPin(number) {
@@ -687,27 +707,57 @@
         }
 
         async function retakeSelfie() {
-        selfieData = "";
+      selfieData = "";
 
-        document.getElementById(
-            "selfiePreview"
-        ).style.display = "none";
+      document.getElementById(
+        "selfiePreview"
+      ).removeAttribute("src");
 
-        document.getElementById(
-            "cameraVideo"
-        ).style.display = "block";
+      document.getElementById(
+        "selfiePreview"
+      ).style.display = "none";
 
-        document.getElementById(
-            "retakeButton"
-        ).style.display = "none";
+      document.getElementById(
+        "cameraVideo"
+      ).style.display = "block";
 
-        document.getElementById(
-            "captureButton"
-        ).disabled = true;
+      document.getElementById(
+        "cameraButton"
+      ).style.display = "none";
 
-        updateSubmitButton();
+      document.getElementById(
+        "captureButton"
+      ).style.display = "inline-flex";
 
-        await startCamera();
+      document.getElementById(
+        "captureButton"
+      ).disabled = true;
+
+      document.getElementById(
+        "retakeButton"
+      ).style.display = "none";
+
+      document.getElementById(
+        "continuePinButton"
+      ).style.display = "none";
+
+      updateSubmitButton();
+
+      await startCamera();
+    }
+
+    function lanjutKePin() {
+      if (!selfieData) {
+        Swal.fire({
+          icon: "warning",
+          title: "Selfie belum tersedia",
+          text: "Ambil selfie terlebih dahulu."
+        });
+
+        return;
+      }
+
+      showStep(3);
     }
 
     async function submitAttendance() {
@@ -758,7 +808,6 @@
         const payload = {
           action: "absen",
           idToko: tokoId,
-          barcode: employeeBarcode,
           pin: currentPin,
           latitude: currentLatitude,
           longitude: currentLongitude,
@@ -867,11 +916,23 @@
         ).style.display = "block";
 
         document.getElementById(
+        "cameraButton"
+        ).style.display = "inline-flex";
+
+        document.getElementById(
+        "captureButton"
+        ).style.display = "inline-flex";
+
+        document.getElementById(
         "captureButton"
         ).disabled = true;
 
         document.getElementById(
         "retakeButton"
+        ).style.display = "none";
+
+        document.getElementById(
+        "continuePinButton"
         ).style.display = "none";
 
         document.getElementById(
