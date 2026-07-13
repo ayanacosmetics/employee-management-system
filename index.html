@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard - EMS</title>
+
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">E</div>
+      <div>
+        <h2>EMS</h2>
+        <small>Employee Management System</small>
+      </div>
+    </div>
+
+    <nav>
+      <a class="active" href="index.html">
+        <i data-lucide="layout-dashboard"></i>
+        Dashboard
+      </a>
+
+      <a href="karyawan.html">
+        <i data-lucide="users"></i>
+        Karyawan
+      </a>
+
+      <a href="absen.html">
+        <i data-lucide="scan-line"></i>
+        Absensi
+      </a>
+
+      <a href="shift.html">
+        <i data-lucide="calendar-clock"></i>
+        Jadwal Shift
+      </a>
+
+      <a href="izin.html">
+        <i data-lucide="file-text"></i>
+        Izin & Cuti
+      </a>
+
+      <a href="rekap.html">
+        <i data-lucide="bar-chart-3"></i>
+        Rekap Absensi
+      </a>
+
+      <a href="pengaturan.html">
+        <i data-lucide="settings"></i>
+        Pengaturan
+      </a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <header class="header">
+      <div>
+        <h1>Dashboard</h1>
+        <p>Selamat datang kembali</p>
+      </div>
+
+      <button class="icon-button">
+        <i data-lucide="bell"></i>
+      </button>
+    </header>
+
+    <section class="summary-grid">
+      <article class="summary-card">
+        <span class="summary-icon green">
+          <i data-lucide="user-check"></i>
+        </span>
+        <div>
+          <small>Hadir</small>
+          <strong>18</strong>
+        </div>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-icon orange">
+          <i data-lucide="clock"></i>
+        </span>
+        <div>
+          <small>Terlambat</small>
+          <strong>2</strong>
+        </div>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-icon red">
+          <i data-lucide="user-x"></i>
+        </span>
+        <div>
+          <small>Belum Hadir</small>
+          <strong>3</strong>
+        </div>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-icon blue">
+          <i data-lucide="briefcase-business"></i>
+        </span>
+        <div>
+          <small>Sedang Bekerja</small>
+          <strong>15</strong>
+        </div>
+      </article>
+    </section>
+
+    <section class="content-grid">
+      <article class="panel">
+        <h3>Ringkasan Kehadiran Hari Ini</h3>
+        <div class="placeholder">
+          Grafik kehadiran
+        </div>
+      </article>
+
+      <article class="panel">
+        <h3>Karyawan Terbaru Absen</h3>
+
+        <div class="attendance-list">
+          <div>
+            <span>Budhi Wirayudha</span>
+            <small>08:02 WIB</small>
+          </div>
+
+          <div>
+            <span>Rian Maulana</span>
+            <small>08:05 WIB</small>
+          </div>
+
+          <div>
+            <span>Siti Aisyah</span>
+            <small>08:08 WIB</small>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>

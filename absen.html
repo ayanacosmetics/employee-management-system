@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Absensi Karyawan - EMS</title>
+
+  <link rel="stylesheet" href="css/style.css">
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="js/config.js"></script>
+</head>
+
+<body class="attendance-page">
+
+  <main class="attendance-shell">
+
+    <header class="attendance-header">
+      <div>
+        <small>Employee Management System</small>
+        <h1>Absensi Karyawan</h1>
+      </div>
+
+      <div class="attendance-store">
+        <i data-lucide="store"></i>
+        <span id="storeName">TK. Ana Yuliana</span>
+      </div>
+    </header>
+
+    <section class="attendance-steps">
+
+      <div class="attendance-step active" data-step="1">
+        <span>1</span>
+        <small>Lokasi</small>
+      </div>
+
+      <div class="attendance-line"></div>
+
+      <div class="attendance-step" data-step="2">
+        <span>2</span>
+        <small>Selfie</small>
+      </div>
+
+      <div class="attendance-line"></div>
+
+      <div class="attendance-step" data-step="3">
+        <span>3</span>
+        <small>PIN</small>
+      </div>
+
+      <div class="attendance-line"></div>
+
+      <div class="attendance-step" data-step="4">
+        <span>4</span>
+        <small>Selesai</small>
+      </div>
+
+    </section>
+
+    <section class="attendance-card">
+
+      <!-- LANGKAH 1 -->
+      <div id="stepLocation" class="attendance-content active">
+
+        <div class="attendance-icon purple">
+          <i data-lucide="map-pin"></i>
+        </div>
+
+        <h2>Periksa Lokasi</h2>
+
+        <p>
+          Aktifkan GPS untuk memastikan Anda berada di area toko.
+        </p>
+
+        <div class="location-info">
+          <div>
+            <small>Status lokasi</small>
+            <b id="locationStatus">Belum diperiksa</b>
+          </div>
+
+          <div>
+            <small>Jarak dari toko</small>
+            <b id="distanceText">-</b>
+          </div>
+
+          <div>
+            <small>Akurasi GPS</small>
+            <b id="accuracyText">-</b>
+          </div>
+        </div>
+
+        <button class="attendance-primary" onclick="checkLocation()">
+          <i data-lucide="navigation"></i>
+          Periksa Lokasi
+        </button>
+
+      </div>
+
+      <!-- LANGKAH 2 -->
+      <div id="stepSelfie" class="attendance-content">
+
+        <div class="attendance-icon purple">
+          <i data-lucide="camera"></i>
+        </div>
+
+        <h2>Ambil Selfie</h2>
+
+        <p>
+          Pastikan wajah terlihat jelas dan kamera menghadap ke depan.
+        </p>
+
+        <div class="camera-frame">
+
+          <video
+            id="cameraVideo"
+            autoplay
+            playsinline>
+          </video>
+
+          <canvas id="cameraCanvas"></canvas>
+
+          <img
+            id="selfiePreview"
+            alt="Preview selfie">
+        </div>
+
+        <div class="camera-actions">
+
+          <button
+            id="cameraButton"
+            class="attendance-secondary"
+            onclick="startCamera()">
+
+            <i data-lucide="camera"></i>
+            Buka Kamera
+          </button>
+
+          <button
+            id="captureButton"
+            class="attendance-primary"
+            onclick="captureSelfie()"
+            disabled>
+
+            <i data-lucide="scan-face"></i>
+            Ambil Selfie
+          </button>
+
+        </div>
+
+      </div>
+
+      <!-- LANGKAH 3 -->
+      <div id="stepPin" class="attendance-content">
+
+        <div class="attendance-icon purple">
+          <i data-lucide="lock-keyhole"></i>
+        </div>
+
+        <h2>Masukkan PIN</h2>
+
+        <p>
+          Masukkan PIN pribadi untuk mengonfirmasi absensi.
+        </p>
+
+        <div class="pin-display" id="pinDisplay">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+
+        <div class="pin-keypad">
+          <button onclick="inputPin('1')">1</button>
+          <button onclick="inputPin('2')">2</button>
+          <button onclick="inputPin('3')">3</button>
+
+          <button onclick="inputPin('4')">4</button>
+          <button onclick="inputPin('5')">5</button>
+          <button onclick="inputPin('6')">6</button>
+
+          <button onclick="inputPin('7')">7</button>
+          <button onclick="inputPin('8')">8</button>
+          <button onclick="inputPin('9')">9</button>
+
+          <button onclick="clearPin()">C</button>
+          <button onclick="inputPin('0')">0</button>
+          <button onclick="deletePin()">
+            <i data-lucide="delete"></i>
+          </button>
+        </div>
+
+        <button
+          class="attendance-primary"
+          onclick="submitAttendance()">
+
+          <i data-lucide="check-circle-2"></i>
+          Verifikasi dan Absen
+        </button>
+
+      </div>
+
+      <!-- LANGKAH 4 -->
+      <div id="stepSuccess" class="attendance-content">
+
+        <div class="success-check">
+          <i data-lucide="check"></i>
+        </div>
+
+        <h2>Absensi Berhasil</h2>
+
+        <p id="successEmployee">Karyawan</p>
+
+        <div class="success-time" id="successTime">
+          00:00:00
+        </div>
+
+        <div class="success-details">
+
+          <div>
+            <small>Status</small>
+            <b id="successStatus">Masuk</b>
+          </div>
+
+          <div>
+            <small>Toko</small>
+            <b id="successStore">TK. Ana Yuliana</b>
+          </div>
+
+          <div>
+            <small>Keterangan</small>
+            <b id="successNote">Tepat waktu</b>
+          </div>
+
+        </div>
+
+        <button
+          class="attendance-primary"
+          onclick="resetAttendance()">
+
+          Selesai
+        </button>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <script>
+    lucide.createIcons();
+
+    let currentStep = 1;
+    let currentPin = "";
+    let selfieData = "";
+    let cameraStream = null;
+
+    let currentLatitude = null;
+    let currentLongitude = null;
+    let currentAccuracy = null;
+    let currentDistance = null;
+
+    let currentToko = null;
+
+    const params = new URLSearchParams(
+        window.location.search
+    );
+
+    const tokoId =
+        params.get("toko") ||
+        DEFAULT_TOKO_ID;
+
+    function showStep(step) {
+        currentStep = step;
+
+        document
+        .querySelectorAll(".attendance-content")
+        .forEach(el => {
+            el.classList.remove("active");
+        });
+
+        document
+        .querySelectorAll(".attendance-step")
+        .forEach(el => {
+            const stepNumber =
+            Number(el.dataset.step);
+
+            el.classList.toggle(
+            "active",
+            stepNumber <= step
+            );
+        });
+
+        const target = {
+        1: "stepLocation",
+        2: "stepSelfie",
+        3: "stepPin",
+        4: "stepSuccess"
+        }[step];
+
+        document
+        .getElementById(target)
+        .classList.add("active");
+
+        lucide.createIcons();
+    }
+
+    async function loadToko() {
+        try {
+        const url =
+            `${EMS_API_URL}?action=getToko&id=${encodeURIComponent(tokoId)}`;
+
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!data.success) {
+            throw new Error(
+            data.message || "Toko tidak ditemukan."
+            );
+        }
+
+        currentToko = data.toko;
+
+        document.getElementById(
+            "storeName"
+        ).innerText = currentToko.nama;
+
+        document.getElementById(
+            "successStore"
+        ).innerText = currentToko.nama;
+
+        } catch (error) {
+        Swal.fire({
+            icon: "error",
+            title: "Data toko gagal dimuat",
+            text: error.message,
+            allowOutsideClick: false
+        });
+        }
+    }
+
+    function hitungJarakMeter(
+        lat1,
+        lon1,
+        lat2,
+        lon2
+    ) {
+        const R = 6371000;
+        const toRad =
+        value => value * Math.PI / 180;
+
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+
+        const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) *
+        Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) ** 2;
+
+        const c =
+        2 * Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+        );
+
+        return R * c;
+    }
+
+    function checkLocation() {
+        if (!currentToko) {
+        Swal.fire({
+            icon: "warning",
+            title: "Toko belum siap",
+            text: "Tunggu data toko selesai dimuat."
+        });
+
+        return;
+        }
+
+        if (!navigator.geolocation) {
+        Swal.fire({
+            icon: "error",
+            title: "GPS tidak tersedia",
+            text: "Perangkat ini tidak mendukung lokasi."
+        });
+
+        return;
+        }
+
+        const statusEl =
+        document.getElementById(
+            "locationStatus"
+        );
+
+        const distanceEl =
+        document.getElementById(
+            "distanceText"
+        );
+
+        const accuracyEl =
+        document.getElementById(
+            "accuracyText"
+        );
+
+        statusEl.innerText = "Memeriksa...";
+        distanceEl.innerText = "-";
+        accuracyEl.innerText = "-";
+
+        navigator.geolocation.getCurrentPosition(
+        position => {
+            currentLatitude =
+            position.coords.latitude;
+
+            currentLongitude =
+            position.coords.longitude;
+
+            currentAccuracy =
+            Math.round(
+                position.coords.accuracy
+            );
+            console.log("Latitude :", currentLatitude);
+            console.log("Longitude:", currentLongitude);
+            console.log("Accuracy :", currentAccuracy);
+
+            currentDistance =
+            Math.round(
+                hitungJarakMeter(
+                currentLatitude,
+                currentLongitude,
+                Number(currentToko.latitude),
+                Number(currentToko.longitude)
+                )
+            );
+
+            distanceEl.innerText =
+            `${currentDistance} meter`;
+
+            accuracyEl.innerText =
+            `${currentAccuracy} meter`;
+
+            if (currentAccuracy > 100) {
+            statusEl.innerText =
+                "Akurasi GPS rendah";
+
+            Swal.fire({
+                icon: "warning",
+                title: "GPS belum akurat",
+                text:
+                "Coba pindah ke area terbuka, lalu periksa lokasi kembali."
+            });
+
+            return;
+            }
+
+            if (
+            currentDistance >
+            Number(currentToko.radius)
+            ) {
+            statusEl.innerText =
+                "Di luar area toko";
+
+            Swal.fire({
+                icon: "error",
+                title: "Di luar radius",
+                text:
+                `Jarak Anda ${currentDistance} meter. ` +
+                `Batas maksimal ${currentToko.radius} meter.`
+            });
+
+            return;
+            }
+
+            statusEl.innerText =
+            "Dalam area toko";
+
+            Swal.fire({
+            icon: "success",
+            title: "Lokasi sesuai",
+            text:
+                `Jarak ${currentDistance} meter dari toko.`,
+            timer: 1200,
+            showConfirmButton: false
+            }).then(() => {
+            showStep(2);
+            });
+        },
+
+        error => {
+            statusEl.innerText =
+            "Gagal memperoleh lokasi";
+
+            Swal.fire({
+            icon: "error",
+            title: "Lokasi gagal",
+            text: error.message
+            });
+        },
+
+        {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0
+        }
+        );
+    }
+
+    async function startCamera() {
+        try {
+        cameraStream =
+            await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: "user",
+                width: {
+                ideal: 720
+                },
+                height: {
+                ideal: 960
+                }
+            },
+            audio: false
+            });
+
+        const video =
+            document.getElementById(
+            "cameraVideo"
+            );
+
+        video.srcObject = cameraStream;
+
+        document.getElementById(
+            "captureButton"
+        ).disabled = false;
+
+        } catch (error) {
+        Swal.fire({
+            icon: "error",
+            title: "Kamera gagal dibuka",
+            text: error.message
+        });
+        }
+    }
+
+    function captureSelfie() {
+        const video =
+        document.getElementById(
+            "cameraVideo"
+        );
+
+        const canvas =
+        document.getElementById(
+            "cameraCanvas"
+        );
+
+        const preview =
+        document.getElementById(
+            "selfiePreview"
+        );
+
+        if (
+        !video.videoWidth ||
+        !video.videoHeight
+        ) {
+        Swal.fire({
+            icon: "warning",
+            title: "Kamera belum siap",
+            text:
+            "Tunggu beberapa detik lalu coba lagi."
+        });
+
+        return;
+        }
+
+        canvas.width = 720;
+        canvas.height = 960;
+
+        const context =
+        canvas.getContext("2d");
+
+        context.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+        );
+
+        selfieData =
+        canvas.toDataURL(
+            "image/jpeg",
+            0.72
+        );
+
+        preview.src = selfieData;
+        preview.style.display = "block";
+        video.style.display = "none";
+
+        if (cameraStream) {
+        cameraStream
+            .getTracks()
+            .forEach(track => track.stop());
+
+        cameraStream = null;
+        }
+
+        setTimeout(() => {
+        showStep(3);
+        }, 600);
+    }
+
+    function inputPin(number) {
+        if (currentPin.length >= 4) return;
+
+        currentPin += number;
+        updatePinDisplay();
+    }
+
+    function deletePin() {
+        currentPin =
+        currentPin.slice(0, -1);
+
+        updatePinDisplay();
+    }
+
+    function clearPin() {
+        currentPin = "";
+        updatePinDisplay();
+    }
+
+    function updatePinDisplay() {
+        const dots =
+        document.querySelectorAll(
+            "#pinDisplay span"
+        );
+
+        dots.forEach((dot, index) => {
+        dot.classList.toggle(
+            "filled",
+            index < currentPin.length
+        );
+        });
+    }
+
+    async function submitAttendance() {
+        if (currentPin.length !== 4) {
+        Swal.fire({
+            icon: "warning",
+            title: "PIN belum lengkap",
+            text: "Masukkan PIN 4 digit."
+        });
+
+        return;
+        }
+
+        if (!selfieData) {
+        Swal.fire({
+            icon: "warning",
+            title: "Selfie belum tersedia",
+            text: "Ambil selfie terlebih dahulu."
+        });
+
+        return;
+        }
+
+        if (
+        currentLatitude === null ||
+        currentLongitude === null
+        ) {
+        Swal.fire({
+            icon: "warning",
+            title: "Lokasi belum tersedia",
+            text: "Periksa lokasi terlebih dahulu."
+        });
+
+        return;
+        }
+
+        Swal.fire({
+        title: "Menyimpan absensi...",
+        text:
+            "Mohon tunggu, foto sedang diunggah.",
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+        });
+
+        try {
+        const payload = {
+            action: "absen",
+            idToko: tokoId,
+            pin: currentPin,
+            latitude: currentLatitude,
+            longitude: currentLongitude,
+            accuracy: currentAccuracy,
+            selfieBase64: selfieData,
+            device: navigator.userAgent
+        };
+
+        const res = await fetch(
+            EMS_API_URL,
+            {
+            method: "POST",
+            headers: {
+                "Content-Type":
+                "text/plain;charset=utf-8"
+            },
+            body: JSON.stringify(payload)
+            }
+        );
+
+        const text = await res.text();
+
+        if (text.trim().startsWith("<")) {
+            throw new Error(
+            "Apps Script mengembalikan halaman error."
+            );
+        }
+
+        const data = JSON.parse(text);
+
+        if (!data.success) {
+            throw new Error(
+            data.message ||
+            "Absensi gagal disimpan."
+            );
+        }
+
+        document.getElementById(
+            "successEmployee"
+        ).innerText = data.nama;
+
+        document.getElementById(
+            "successTime"
+        ).innerText =
+            new Date(data.waktu)
+            .toLocaleTimeString(
+                "id-ID",
+                {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit"
+                }
+            );
+
+        document.getElementById(
+            "successStatus"
+        ).innerText = data.jenis;
+
+        document.getElementById(
+            "successStore"
+        ).innerText = data.toko;
+
+        document.getElementById(
+            "successNote"
+        ).innerText = data.status;
+
+        Swal.close();
+        showStep(4);
+
+        } catch (error) {
+        Swal.fire({
+            icon: "error",
+            title: "Absensi gagal",
+            text: error.message
+        });
+        }
+    }
+
+    function resetAttendance() {
+        currentPin = "";
+        selfieData = "";
+
+        currentLatitude = null;
+        currentLongitude = null;
+        currentAccuracy = null;
+        currentDistance = null;
+
+        document.getElementById(
+        "locationStatus"
+        ).innerText = "Belum diperiksa";
+
+        document.getElementById(
+        "distanceText"
+        ).innerText = "-";
+
+        document.getElementById(
+        "accuracyText"
+        ).innerText = "-";
+
+        document.getElementById(
+        "selfiePreview"
+        ).style.display = "none";
+
+        document.getElementById(
+        "cameraVideo"
+        ).style.display = "block";
+
+        document.getElementById(
+        "captureButton"
+        ).disabled = true;
+
+        updatePinDisplay();
+        showStep(1);
+    }
+
+    loadToko();
+    </script>
+
+</body>
+</html>
