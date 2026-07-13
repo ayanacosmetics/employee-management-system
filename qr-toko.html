@@ -3,19 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
   <title>QR Absensi Toko</title>
-
   <link rel="stylesheet" href="css/style.css">
-
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="js/config.js"></script>
 </head>
-
 <body class="qr-page">
-
   <main class="qr-shell">
-
     <header class="qr-header">
       <div>
         <small>Employee Management System</small>
@@ -23,195 +18,123 @@
       </div>
     </header>
 
-    <section class="qr-grid">
-
-      <article class="qr-card qr-print-poster">
-        <div class="qr-poster-border">
-
-            <div class="qr-poster-header">
-            <div class="qr-poster-logo">
-                <i data-lucide="store"></i>
-            </div>
-
-            <div>
-                <small>EMPLOYEE MANAGEMENT SYSTEM</small>
-                <h2>ABSENSI KARYAWAN</h2>
-            </div>
-            </div>
-
-            <div class="qr-poster-store">
-            <span>Lokasi Absensi</span>
-            <h3>TK. Ana Yuliana</h3>
-            </div>
-
-            <p class="qr-poster-instruction">
-            Scan QR menggunakan kamera HP untuk membuka halaman absensi.
-            </p>
-
-            <div id="qrTokoAna" class="qr-code-box qr-code-print"></div>
-
-            <div class="qr-poster-id">
-            <small>ID TOKO</small>
-            <strong>T001</strong>
-            </div>
-
-            <div class="qr-poster-steps">
-            <div>
-                <span>1</span>
-                <small>Scan QR</small>
-            </div>
-
-            <div>
-                <span>2</span>
-                <small>Aktifkan GPS</small>
-            </div>
-
-            <div>
-                <span>3</span>
-                <small>Selfie & PIN</small>
-            </div>
-            </div>
-
-            <div class="qr-poster-note">
-            <i data-lucide="shield-check"></i>
-            <span>
-                Absensi hanya dapat dilakukan di dalam radius toko.
-            </span>
-            </div>
-
-            <button
-            class="qr-print-button"
-            onclick="printQr('ana')">
-            <i data-lucide="printer"></i>
-            Cetak QR
-            </button>
-
-        </div>
-      </article>
-
-      <article class="qr-card qr-print-poster">
-        <div class="qr-poster-border">
-
-            <div class="qr-poster-header">
-            <div class="qr-poster-logo">
-                <i data-lucide="store"></i>
-            </div>
-
-            <div>
-                <small>EMPLOYEE MANAGEMENT SYSTEM</small>
-                <h2>ABSENSI KARYAWAN</h2>
-            </div>
-            </div>
-
-            <div class="qr-poster-store">
-            <span>Lokasi Absensi</span>
-            <h3>TK. Ayana Cosmetics</h3>
-            </div>
-
-            <p class="qr-poster-instruction">
-            Scan QR menggunakan kamera HP untuk membuka halaman absensi.
-            </p>
-
-            <div id="qrTokoAyana" class="qr-code-box qr-code-print"></div>
-
-            <div class="qr-poster-id">
-            <small>ID TOKO</small>
-            <strong>T002</strong>
-            </div>
-
-            <div class="qr-poster-steps">
-            <div>
-                <span>1</span>
-                <small>Scan QR</small>
-            </div>
-
-            <div>
-                <span>2</span>
-                <small>Aktifkan GPS</small>
-            </div>
-
-            <div>
-                <span>3</span>
-                <small>Selfie & PIN</small>
-            </div>
-            </div>
-
-            <div class="qr-poster-note">
-            <i data-lucide="shield-check"></i>
-            <span>
-                Absensi hanya dapat dilakukan di dalam radius toko.
-            </span>
-            </div>
-
-            <button
-            class="qr-print-button"
-            onclick="printQr('ayana')"
-            >
-            <i data-lucide="printer"></i>
-            Cetak QR
-            </button>
-
-        </div>
-      </article>
-
+    <section id="qrStoreGrid" class="qr-grid">
+      <p>Memuat daftar toko...</p>
     </section>
-
   </main>
 
   <script>
-    const BASE_ABSEN_URL =
-      "https://employee-management-system-sigma-sage.vercel.app/absen.html";
+    const BASE_ABSEN_URL = `${window.location.origin}/absen.html`;
 
-    const linkAna =
-      `${BASE_ABSEN_URL}?toko=T001`;
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
 
-    const linkAyana =
-      `${BASE_ABSEN_URL}?toko=T002`;
+    async function loadQrToko() {
+      const grid = document.getElementById("qrStoreGrid");
 
-    new QRCode(
-      document.getElementById("qrTokoAna"),
-      {
-        text: linkAna,
-        width: 240,
-        height: 240,
-        correctLevel: QRCode.CorrectLevel.H
+      try {
+        const response = await fetch(`${EMS_API_URL}?action=listToko`);
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.message || "Daftar toko gagal dimuat.");
+        }
+
+        const items = Array.isArray(data.items) ? data.items : [];
+
+        if (items.length === 0) {
+          grid.innerHTML = "<p>Belum ada toko yang terdaftar.</p>";
+          return;
+        }
+
+        grid.innerHTML = items.map((toko, index) => `
+          <article class="qr-card qr-print-poster" data-store-index="${index}">
+            <div class="qr-poster-border">
+              <div class="qr-poster-header">
+                <div class="qr-poster-logo">
+                  <i data-lucide="store"></i>
+                </div>
+                <div>
+                  <small>EMPLOYEE MANAGEMENT SYSTEM</small>
+                  <h2>ABSENSI KARYAWAN</h2>
+                </div>
+              </div>
+
+              <div class="qr-poster-store">
+                <span>Lokasi Absensi</span>
+                <h3>${escapeHtml(toko.nama)}</h3>
+              </div>
+
+              <p class="qr-poster-instruction">
+                Scan QR menggunakan kamera HP untuk membuka halaman absensi.
+              </p>
+
+              <div id="qrStore-${index}" class="qr-code-box qr-code-print"></div>
+
+              <div class="qr-poster-id">
+                <small>ID TOKO</small>
+                <strong>${escapeHtml(toko.id)}</strong>
+              </div>
+
+              <div class="qr-poster-steps">
+                <div><span>1</span><small>Scan QR</small></div>
+                <div><span>2</span><small>Aktifkan GPS</small></div>
+                <div><span>3</span><small>Selfie & PIN</small></div>
+              </div>
+
+              <div class="qr-poster-note">
+                <i data-lucide="shield-check"></i>
+                <span>Absensi hanya dapat dilakukan di dalam radius toko.</span>
+              </div>
+
+              <button class="qr-print-button" onclick="printQr(${index})">
+                <i data-lucide="printer"></i>
+                Cetak QR
+              </button>
+            </div>
+          </article>
+        `).join("");
+
+        items.forEach((toko, index) => {
+          const link = `${BASE_ABSEN_URL}?toko=${encodeURIComponent(toko.id)}`;
+
+          new QRCode(document.getElementById(`qrStore-${index}`), {
+            text: link,
+            width: 240,
+            height: 240,
+            correctLevel: QRCode.CorrectLevel.H
+          });
+        });
+
+        lucide.createIcons();
+      } catch (error) {
+        grid.innerHTML = `<p>Gagal memuat QR toko: ${escapeHtml(error.message)}</p>`;
       }
-    );
+    }
 
-    new QRCode(
-      document.getElementById("qrTokoAyana"),
-      {
-        text: linkAyana,
-        width: 240,
-        height: 240,
-        correctLevel: QRCode.CorrectLevel.H
-      }
-    );
+    function printQr(index) {
+      document.querySelectorAll(".qr-card").forEach(card => {
+        card.classList.remove("print-active");
+      });
 
-    function printQr(toko) {
-      document.body.classList.remove(
-        "print-ana",
-        "print-ayana"
-      );
+      const target = document.querySelector(`.qr-card[data-store-index="${index}"]`);
+      if (!target) return;
 
-      document.body.classList.add(
-        toko === "ana"
-          ? "print-ana"
-          : "print-ayana"
-      );
-
+      target.classList.add("print-active");
       window.print();
 
       setTimeout(() => {
-        document.body.classList.remove(
-          "print-ana",
-          "print-ayana"
-        );
+        target.classList.remove("print-active");
       }, 500);
     }
 
-    lucide.createIcons();
+    loadQrToko();
   </script>
-
 </body>
 </html>
