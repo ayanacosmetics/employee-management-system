@@ -270,6 +270,9 @@
         params.get("toko") ||
         DEFAULT_TOKO_ID;
 
+    const employeeBarcode =
+        String(params.get("barcode") || "").trim();
+
     function showStep(step) {
         currentStep = step;
 
