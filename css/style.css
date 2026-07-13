@@ -516,3 +516,143 @@ nav a.active {
     min-width: 48px;
   }
 }
+
+.qr-page {
+  min-height: 100vh;
+  display: block;
+  background: #f7f8fc;
+}
+
+.qr-shell {
+  width: min(1100px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
+}
+
+.qr-header {
+  margin-bottom: 24px;
+}
+
+.qr-header h1,
+.qr-header small {
+  margin: 0;
+}
+
+.qr-header h1 {
+  margin-top: 4px;
+}
+
+.qr-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 22px;
+}
+
+.qr-card {
+  padding: 28px;
+  text-align: center;
+  border: 1px solid #e4e6ee;
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 14px 40px rgba(33, 24, 76, 0.08);
+}
+
+.qr-card h2 {
+  margin: 14px 0 7px;
+}
+
+.qr-card p {
+  margin: 0 0 20px;
+  color: #777b8e;
+}
+
+.qr-store-icon {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  color: #6d28d9;
+  background: #ede9fe;
+}
+
+.qr-code-box {
+  width: 270px;
+  min-height: 270px;
+  margin: 0 auto 14px;
+  padding: 15px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #ece9f5;
+  border-radius: 16px;
+  background: white;
+}
+
+.qr-code-box img,
+.qr-code-box canvas {
+  max-width: 100%;
+  height: auto !important;
+}
+
+.qr-id {
+  display: block;
+  margin-bottom: 18px;
+  color: #7b7e8f;
+}
+
+.qr-print-button {
+  min-height: 46px;
+  padding: 0 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 12px;
+  color: white;
+  background: #6d28d9;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .qr-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+  }
+
+  .qr-header,
+  .qr-print-button {
+    display: none !important;
+  }
+
+  .qr-grid {
+    display: block;
+  }
+
+  .qr-card {
+    display: none;
+    width: 100%;
+    min-height: 95vh;
+    border: 0;
+    box-shadow: none;
+    page-break-after: always;
+  }
+
+  .print-ana .qr-card:first-child,
+  .print-ayana .qr-card:last-child {
+    display: block;
+  }
+
+  .qr-code-box {
+    width: 360px;
+    min-height: 360px;
+    margin-top: 36px;
+  }
+}
