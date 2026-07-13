@@ -10,7 +10,8 @@ const SHEET_PENGUMUMAN = "Pengumuman";
 const SHEET_PAYROLL = "Payroll";
 
 function doGet(e) {
-  const action = String(e.parameter.action || "").trim();
+  ensureSystemSchema_();
+  const action = String((e && e.parameter && e.parameter.action) || "").trim();
 
   if (action === "getAdminSetupStatus") {
     return json(getAdminSetupStatus_());
@@ -23,7 +24,7 @@ function doGet(e) {
   const adminGetActions = [
     "listKaryawanAdmin", "getDashboard", "getRiwayatAbsensiAdmin",
     "getJadwalAdmin", "listIzinAdmin", "listPengumuman",
-    "getPayrollAdmin", "getPengaturanAdmin"
+    "getPayrollAdmin", "getPengaturanAdmin", "getSystemHealth"
   ];
   if (adminGetActions.indexOf(action) !== -1) {
     const auth = requireAdmin_(e.parameter.adminToken);
@@ -138,6 +139,10 @@ function doGet(e) {
     return json(getPengaturanAdmin_());
   }
 
+  if (action === "getSystemHealth") {
+    return json(getSystemHealth_());
+  }
+
   // Portal Karyawan V7 - endpoint tambahan, tidak mengganti endpoint lama.
   if (action === "getPortalHome") {
     return json(getPortalHome_(e.parameter.token));
@@ -170,6 +175,7 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  ensureSystemSchema_();
   let data;
 
   try {
@@ -2247,12 +2253,105 @@ function sendPayrollEmail_(data){
   const k=getKaryawanById_(id); if(!k)return{success:false,message:"Karyawan tidak ditemukan."};
   if(!k.email)return{success:false,message:"Email karyawan belum diisi."};
   const row=findPayrollRow_(id,periode); if(!row)return{success:false,message:"Data payroll tidak ditemukan."};
-  if(String(row[11]||"")!=="Dibayar")return{success:false,message:"Slip hanya dapat dikirim setelah status payroll Dibayar."};
+  if(String(row[11]||"").trim().toLowerCase()!=="dibayar")return{success:false,message:"Slip hanya dapat dikirim setelah status payroll Dibayar."};
+  if(MailApp.getRemainingDailyQuota()<=0)return{success:false,message:"Kuota pengiriman email Google hari ini sudah habis. Coba kembali besok."};
   const html=payrollEmailHtml_(k,row,periode);
   const pdf=HtmlService.createHtmlOutput(html).getBlob().getAs(MimeType.PDF).setName(`Slip_Gaji_${k.id}_${periode}.pdf`);
   try{
-    MailApp.sendEmail({to:k.email,subject:`Slip Gaji ${periode} - ${k.nama}`,htmlBody:html,body:`Slip gaji ${periode} tersedia.`,attachments:[pdf],name:"EMS Payroll"});
+    MailApp.sendEmail({to:String(k.email).trim(),subject:`Slip Gaji ${periode} - ${k.nama}`,htmlBody:html,body:`Slip gaji ${periode} tersedia.`,attachments:[pdf],name:"EMS Payroll"});
     simpanLog_(String(data.adminUser||"Admin"),"Mengirim slip gaji email",`${k.nama} | ${k.email} | ${periode}`);
     return{success:true,message:`Slip gaji berhasil dikirim ke ${k.email}.`};
   }catch(error){return{success:false,message:`Gagal mengirim email: ${error.message}`};}
+}
+
+
+// ============================================================
+// EMS V9.1 STABILITY UPDATE
+// Migrasi ringan dan pemeriksaan struktur tanpa menghapus data lama.
+// ============================================================
+function ensureSystemSchema_() {
+  const cache = CacheService.getScriptCache();
+  if (cache.get("EMS_SCHEMA_V91_OK") === "1") return;
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.tryLock(5000);
+    if (cache.get("EMS_SCHEMA_V91_OK") === "1") return;
+
+    ensureKaryawanEmailColumn_();
+    ensureSheetHeader_(SHEET_PAYROLL, ["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
+    ensureSheetHeader_(SHEET_PENGUMUMAN, ["ID","Judul","Isi","Target Toko","Tanggal Mulai","Tanggal Selesai","Status","Dibuat Pada"]);
+    ensureSheetHeader_(SHEET_IZIN, ["Tanggal","ID Karyawan","Nama","ID Toko","Jenis","Alasan","Status","Tanggal Selesai","Bukti","Catatan Admin","Diproses Pada"]);
+    ensureSheetHeader_(SHEET_LOG, ["Waktu","User","Aktivitas","Keterangan"]);
+
+    cache.put("EMS_SCHEMA_V91_OK", "1", 300);
+  } catch (error) {
+    console.error("Migrasi schema V9.1 dilewati:", error);
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function ensureSheetHeader_(sheetName, headers) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(sheetName);
+  if (!sh) sh = ss.insertSheet(sheetName);
+
+  if (sh.getMaxColumns() < headers.length) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), headers.length - sh.getMaxColumns());
+  }
+
+  const current = sh.getRange(1, 1, 1, headers.length).getDisplayValues()[0];
+  const output = current.slice();
+  let changed = false;
+
+  headers.forEach((header, index) => {
+    if (!String(output[index] || "").trim()) {
+      output[index] = header;
+      changed = true;
+    }
+  });
+
+  if (changed) sh.getRange(1, 1, 1, headers.length).setValues([output]);
+  return sh;
+}
+
+function getSystemHealth_() {
+  ensureSystemSchema_();
+  const ss = SpreadsheetApp.getActive();
+  const required = [
+    SHEET_TOKO, SHEET_KARYAWAN, SHEET_SHIFT, SHEET_JADWAL,
+    SHEET_ABSENSI, SHEET_IZIN, SHEET_LOG, SHEET_PENGATURAN,
+    SHEET_PENGUMUMAN, SHEET_PAYROLL
+  ];
+
+  const sheets = required.map(name => {
+    const sh = ss.getSheetByName(name);
+    return {
+      name,
+      exists: Boolean(sh),
+      rows: sh ? Math.max(0, sh.getLastRow() - 1) : 0,
+      columns: sh ? sh.getLastColumn() : 0
+    };
+  });
+
+  let emailQuota = null;
+  try { emailQuota = MailApp.getRemainingDailyQuota(); } catch (_) {}
+
+  return {
+    success: true,
+    version: "9.1",
+    timezone: Session.getScriptTimeZone(),
+    adminConfigured: Boolean(adminProps_().getProperty("EMS_ADMIN_USERNAME")),
+    emailQuota,
+    sheets,
+    checkedAt: new Date().toISOString()
+  };
+}
+
+// Jalankan manual satu kali bila Google perlu meminta izin pengiriman email.
+function authorizeEmailAccess() {
+  const quota = MailApp.getRemainingDailyQuota();
+  Logger.log("Sisa kuota email: " + quota);
+  return quota;
 }
