@@ -34,3 +34,12 @@ Kolom:
 
 ## Tahap berikutnya
 Panel Owner Platform dan provisioning otomatis pelanggan baru akan dibangun pada V12.1 setelah fondasi routing tenant ini diuji pada instalasi aktif.
+
+## V12.1 — Panel Owner Platform
+
+Halaman baru:
+
+- `platform-login.html`: login khusus pemilik platform.
+- `platform.html`: daftar dan provisioning pelanggan.
+
+Owner Platform dapat membuat pelanggan baru. Sistem otomatis membuat spreadsheet terpisah, folder Drive, akun Owner Pelanggan, dan toko pertama opsional. Akun platform sengaja dipisahkan dari akun admin pelanggan.

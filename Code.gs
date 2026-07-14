@@ -10,6 +10,7 @@ const SHEET_PENGUMUMAN = "Pengumuman";
 const SHEET_PAYROLL = "Payroll";
 const SHEET_ADMIN = "Admin";
 const SHEET_PELANGGAN = "Pelanggan";
+const SHEET_PLATFORM_ADMIN = "Platform Admin";
 const DEFAULT_TENANT_ID = "PLG001";
 const DEFAULT_TENANT_CODE = "DEFAULT";
 let EMS_TENANT_CONTEXT = null;
@@ -97,9 +98,16 @@ function getTenantInfo_() {
 
 
 function doGet(e) {
+  const action = String((e && e.parameter && e.parameter.action) || "").trim();
+
+  // Endpoint Owner Platform berjalan di spreadsheet master dan tidak bergantung pada tenant aktif.
+  if (action === "getPlatformSetupStatus") return json(getPlatformSetupStatus_());
+  if (action === "validatePlatformSession") return json(validatePlatformSession_(e.parameter.platformToken));
+  if (action === "getPlatformSummary") return json(getPlatformSummary_(e.parameter.platformToken));
+  if (action === "listPlatformTenants") return json(listPlatformTenants_(e.parameter.platformToken));
+
   try { initializeTenantForGet_(e); } catch (error) { return json({success:false,message:error.message}); }
   ensureSystemSchema_();
-  const action = String((e && e.parameter && e.parameter.action) || "").trim();
 
   if (action === "getAdminSetupStatus") {
     return json(Object.assign(getAdminSetupStatus_(), {tenant:getTenantInfo_().tenant}));
@@ -288,6 +296,13 @@ function doPost(e) {
   }
 
   const action = String(data.action || "").trim();
+
+  // Endpoint Owner Platform tidak memakai konteks tenant pelanggan.
+  if (action === "setupPlatformOwner") return json(setupPlatformOwner_(data));
+  if (action === "loginPlatformOwner") return json(loginPlatformOwner_(data));
+  if (action === "savePlatformTenant") return json(savePlatformTenant_(data));
+  if (action === "setPlatformTenantStatus") return json(setPlatformTenantStatus_(data));
+
   try { initializeTenantForPost_(data); } catch (error) { return json({success:false,message:error.message}); }
 
   if (action === "setupAdmin") {
@@ -2619,4 +2634,130 @@ function authorizeEmailAccess() {
   const quota = MailApp.getRemainingDailyQuota();
   Logger.log("Sisa kuota email: " + quota);
   return quota;
+}
+
+
+// ============================================================
+// EMS V12.1 - PANEL OWNER PLATFORM
+// Lapisan terpisah dari admin pelanggan. Tidak mengubah endpoint tenant lama.
+// ============================================================
+function getPlatformAdminSheet_(){
+  return ensureMasterSheetHeader_(SHEET_PLATFORM_ADMIN,["Username","Password Hash","Salt","Nama","Status","Version","Dibuat Pada","Login Terakhir"]);
+}
+function platformAdminRows_(){
+  const sh=getPlatformAdminSheet_();
+  return sh.getLastRow()<2?[]:sh.getRange(2,1,sh.getLastRow()-1,8).getValues();
+}
+function findPlatformAdmin_(username){
+  const key=String(username||"").trim().toLowerCase();
+  const rows=platformAdminRows_(); const index=rows.findIndex(r=>String(r[0]||"").trim().toLowerCase()===key);
+  if(index<0)return null; const r=rows[index];
+  return{row:index+2,username:String(r[0]||"").trim(),hash:String(r[1]||""),salt:String(r[2]||""),nama:String(r[3]||r[0]||"").trim(),status:String(r[4]||"Aktif").trim(),version:Number(r[5])||1};
+}
+function getPlatformSetupStatus_(){
+  return{success:true,configured:platformAdminRows_().some(r=>String(r[0]||"").trim()&&String(r[4]||"Aktif").toLowerCase()==="aktif")};
+}
+function getPlatformSecret_(){
+  const p=PropertiesService.getScriptProperties(); let s=p.getProperty("EMS_PLATFORM_SECRET");
+  if(!s){s=Utilities.getUuid()+Utilities.getUuid();p.setProperty("EMS_PLATFORM_SECRET",s);} return s;
+}
+function makePlatformToken_(admin){
+  const payload={username:admin.username,version:admin.version,scope:"PLATFORM_OWNER",iat:Date.now()};
+  const body=Utilities.base64EncodeWebSafe(JSON.stringify(payload)).replace(/=+$/g,"");
+  const sig=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(body,getPlatformSecret_())).replace(/=+$/g,"");
+  return body+"."+sig;
+}
+function verifyPlatformToken_(token){
+  try{
+    const parts=String(token||"").split("."); if(parts.length!==2)return null;
+    const expected=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(parts[0],getPlatformSecret_())).replace(/=+$/g,"");
+    if(expected!==parts[1])return null;
+    const payload=JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+    if(payload.scope!=="PLATFORM_OWNER"||!payload.username)return null;
+    const admin=findPlatformAdmin_(payload.username);
+    if(!admin||admin.status.toLowerCase()!=="aktif"||admin.version!==(Number(payload.version)||1))return null;
+    return admin;
+  }catch(_){return null;}
+}
+function requirePlatform_(token){const admin=verifyPlatformToken_(token);return admin?{success:true,admin}:{success:false,sessionExpired:true,message:"Sesi Owner Platform tidak valid."};}
+function validatePlatformSession_(token){const r=requirePlatform_(token);return r.success?{success:true,username:r.admin.username,nama:r.admin.nama}:r;}
+function setupPlatformOwner_(data){
+  if(getPlatformSetupStatus_().configured)return{success:false,message:"Owner Platform sudah dikonfigurasi."};
+  const username=String(data.username||"").trim(),password=String(data.password||""),nama=String(data.nama||username).trim();
+  if(username.length<4)return{success:false,message:"Username minimal 4 karakter."};
+  if(password.length<8)return{success:false,message:"Password minimal 8 karakter."};
+  const salt=Utilities.getUuid(); getPlatformAdminSheet_().appendRow([username,adminHash_(salt+":"+password),salt,nama,"Aktif",1,new Date(),""]);
+  return loginPlatformOwner_({username,password});
+}
+function loginPlatformOwner_(data){
+  const username=String(data.username||"").trim(),password=String(data.password||""); const admin=findPlatformAdmin_(username);
+  if(!admin||admin.status.toLowerCase()!=="aktif"||adminHash_(admin.salt+":"+password)!==admin.hash)return{success:false,message:"Username atau password salah."};
+  getPlatformAdminSheet_().getRange(admin.row,8).setValue(new Date());
+  return{success:true,token:makePlatformToken_(admin),username:admin.username,nama:admin.nama,persistent:true};
+}
+function platformDate_(value){if(!value)return"";const d=new Date(value);return isNaN(d)?String(value):Utilities.formatDate(d,Session.getScriptTimeZone(),"yyyy-MM-dd");}
+function platformTenantRows_(){
+  const sh=ensureTenantRegistry_(); return sh.getLastRow()<2?[]:sh.getRange(2,1,sh.getLastRow()-1,12).getValues();
+}
+function platformTenantItem_(r){
+  return{id:String(r[0]||""),code:String(r[1]||""),name:String(r[2]||""),spreadsheetId:String(r[3]||""),folderId:String(r[4]||""),package:String(r[5]||"Basic"),status:String(r[6]||"Aktif"),startDate:platformDate_(r[7]),endDate:platformDate_(r[8]),maxStores:Number(r[9])||0,maxEmployees:Number(r[10])||0,createdAt:r[11]?formatDateTime_(r[11]):""};
+}
+function getPlatformSummary_(token){
+  const auth=requirePlatform_(token);if(!auth.success)return auth;const items=platformTenantRows_().map(platformTenantItem_);
+  return{success:true,summary:{total:items.length,active:items.filter(x=>x.status.toLowerCase()==="aktif").length,inactive:items.filter(x=>x.status.toLowerCase()!=="aktif").length,totalStoreLimit:items.reduce((a,x)=>a+x.maxStores,0),totalEmployeeLimit:items.reduce((a,x)=>a+x.maxEmployees,0)}};
+}
+function listPlatformTenants_(token){const auth=requirePlatform_(token);if(!auth.success)return auth;return{success:true,items:platformTenantRows_().map(platformTenantItem_)};}
+function nextTenantId_(){
+  const nums=platformTenantRows_().map(r=>Number(String(r[0]||"").replace(/\D/g,""))||0);return"PLG"+String(Math.max(0,...nums)+1).padStart(3,"0");
+}
+function tenantHeaders_(){return{
+  "Toko":["ID Toko","Nama Toko","Alamat","Latitude","Longitude","Radius"],
+  "Karyawan":["ID Karyawan","Barcode","Nama","PIN","Jabatan","Shift Default","Status","No HP","Foto","ID Toko","Email"],
+  "Shift":["Nama Shift","Jam Masuk","Jam Pulang","Batas Terlambat"],
+  "Jadwal":["Tanggal","ID Karyawan","Shift"],
+  "Absensi":["Tanggal","ID Karyawan","Nama","ID Toko","Nama Toko","Shift","Jam Masuk","Foto Masuk","Lokasi Masuk","Status Masuk","Jam Pulang","Foto Pulang","Lokasi Pulang","Status Pulang","Durasi"],
+  "Izin":["Tanggal","ID Karyawan","Nama","ID Toko","Jenis","Alasan","Status","Tanggal Selesai","Bukti","Catatan Admin","Diproses Pada"],
+  "Log":["Waktu","User","Aktivitas","Keterangan"],
+  "Pengaturan":["Key","Value"],
+  "Pengumuman":["ID","Judul","Isi","Target Toko","Tanggal Mulai","Tanggal Selesai","Status","Dibuat Pada","Dibuat Oleh"],
+  "Payroll":["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"],
+  "Admin":["Username","Password Hash","Salt","Nama","Role","Status","Version","Dibuat Pada","Login Terakhir"]
+};}
+function provisionTenantSpreadsheet_(name,folderId){
+  const ss=SpreadsheetApp.create("EMS - "+name);const headers=tenantHeaders_();
+  Object.keys(headers).forEach((sheetName,index)=>{let sh=index===0?ss.getSheets()[0]:ss.insertSheet();sh.setName(sheetName);const h=headers[sheetName];if(sh.getMaxColumns()<h.length)sh.insertColumnsAfter(sh.getMaxColumns(),h.length-sh.getMaxColumns());sh.getRange(1,1,1,h.length).setValues([h]);sh.setFrozenRows(1);});
+  if(folderId){try{DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(folderId));}catch(_){}}
+  return ss;
+}
+function createTenantOwner_(ss,username,password,nama){
+  const sh=ss.getSheetByName("Admin"),salt=Utilities.getUuid();sh.appendRow([username,adminHash_(salt+":"+password),salt,nama||username,"Owner","Aktif",1,new Date(),""]);
+}
+function savePlatformTenant_(data){
+  const auth=requirePlatform_(data.platformToken);if(!auth.success)return auth;
+  const original=normalizeTenantKey_(data.originalCode),code=normalizeTenantKey_(data.code),name=String(data.name||"").trim();
+  const pkg=String(data.package||"Basic").trim(),status=String(data.status||"Aktif")==="Nonaktif"?"Nonaktif":"Aktif";
+  const start=data.startDate?new Date(data.startDate):new Date(),end=data.endDate?new Date(data.endDate):"",maxStores=Math.max(1,Number(data.maxStores)||1),maxEmployees=Math.max(1,Number(data.maxEmployees)||5);
+  if(!/^[A-Z0-9_-]{3,20}$/.test(code))return{success:false,message:"Kode pelanggan 3-20 karakter: huruf besar, angka, _ atau -."};
+  if(!name)return{success:false,message:"Nama pelanggan wajib diisi."};
+  const sh=ensureTenantRegistry_(),rows=platformTenantRows_();const existingIndex=rows.findIndex(r=>normalizeTenantKey_(r[1])===(original||code));const duplicate=rows.findIndex(r=>normalizeTenantKey_(r[1])===code);
+  if(duplicate>=0&&duplicate!==existingIndex)return{success:false,message:"Kode pelanggan sudah digunakan."};
+  if(existingIndex>=0){
+    const r=rows[existingIndex];sh.getRange(existingIndex+2,2,1,10).setValues([[code,name,r[3],r[4],pkg,status,start,end,maxStores,maxEmployees]]);
+    return{success:true,message:"Data pelanggan berhasil diperbarui."};
+  }
+  const ownerUsername=String(data.ownerUsername||"owner").trim(),ownerPassword=String(data.ownerPassword||"");
+  if(ownerUsername.length<4)return{success:false,message:"Username Owner Pelanggan minimal 4 karakter."};
+  if(ownerPassword.length<8)return{success:false,message:"Password Owner Pelanggan minimal 8 karakter."};
+  const folder=DriveApp.createFolder("EMS - "+name+" ["+code+"]");const ss=provisionTenantSpreadsheet_(name,folder.getId());
+  createTenantOwner_(ss,ownerUsername,ownerPassword,String(data.ownerName||name).trim());
+  const peng=ss.getSheetByName("Pengaturan");peng.getRange(2,1,2,2).setValues([["FOLDER_DRIVE_ID",folder.getId()],["TENANT_CODE",code]]);
+  const storeName=String(data.storeName||"").trim();if(storeName){ss.getSheetByName("Toko").appendRow([String(data.storeId||"T001").trim()||"T001",storeName,String(data.storeAddress||""),Number(data.latitude)||0,Number(data.longitude)||0,Number(data.radius)||50]);}
+  const id=nextTenantId_();sh.appendRow([id,code,name,ss.getId(),folder.getId(),pkg,status,start,end,maxStores,maxEmployees,new Date()]);
+  return{success:true,message:"Pelanggan berhasil dibuat.",tenant:{id,code,name,spreadsheetId:ss.getId(),folderId:folder.getId()}};
+}
+function setPlatformTenantStatus_(data){
+  const auth=requirePlatform_(data.platformToken);if(!auth.success)return auth;const code=normalizeTenantKey_(data.code),status=String(data.status||"")==="Aktif"?"Aktif":"Nonaktif";
+  if(code===DEFAULT_TENANT_CODE&&status==="Nonaktif")return{success:false,message:"Pelanggan DEFAULT tidak dapat dinonaktifkan dari panel."};
+  const sh=ensureTenantRegistry_(),rows=platformTenantRows_(),i=rows.findIndex(r=>normalizeTenantKey_(r[1])===code);if(i<0)return{success:false,message:"Pelanggan tidak ditemukan."};
+  sh.getRange(i+2,7).setValue(status);return{success:true,message:"Status pelanggan berhasil diperbarui."};
 }
