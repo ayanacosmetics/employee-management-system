@@ -130,7 +130,7 @@
         <h2>Ambil Selfie</h2>
 
         <p>
-          Posisikan satu wajah di dalam bingkai, tatap kamera, lalu tersenyum untuk verifikasi liveness.
+          Posisikan satu wajah di dalam bingkai, tatap kamera, lalu tersenyum. Foto akan diambil otomatis setelah liveness terverifikasi.
         </p>
 
         <div class="camera-frame">
@@ -175,7 +175,7 @@
             disabled>
 
             <i data-lucide="scan-face"></i>
-            Ambil Selfie
+            Menunggu Senyum
           </button>
 
           <button
@@ -348,6 +348,7 @@
     let livenessSmileFrames = 0;
     let livenessBaseline = 0;
     let livenessBaselineSamples = [];
+    let autoCaptureInProgress = false;
 
     let currentLatitude = null;
     let currentLongitude = null;
@@ -723,7 +724,10 @@
       livenessSmileFrames = 0;
       livenessBaseline = 0;
       livenessBaselineSamples = [];
-      document.getElementById("captureButton").disabled = true;
+      autoCaptureInProgress = false;
+      const captureButton = document.getElementById("captureButton");
+      captureButton.disabled = true;
+      captureButton.innerHTML = '<i data-lucide="scan-face"></i> Menunggu Senyum';
       setLivenessStatus("Mencari wajah...", "Posisikan satu wajah di dalam bingkai", 0);
     }
 
@@ -780,8 +784,12 @@
         livenessVerified = true;
         livenessVerifiedAt = Date.now();
         livenessRunning = false;
-        document.getElementById("captureButton").disabled = false;
-        setLivenessStatus("Liveness terverifikasi", "Silakan ambil selfie", 100, "verified");
+        const captureButton = document.getElementById("captureButton");
+        captureButton.disabled = true;
+        captureButton.innerHTML = '<i data-lucide="camera"></i> Mengambil Foto...';
+        setLivenessStatus("Senyum terverifikasi", "Mengambil foto otomatis...", 100, "verified");
+        // Ambil langsung pada frame terverifikasi agar posisi kamera tidak sempat berubah.
+        captureSelfie(true);
       }
     }
 
@@ -849,7 +857,8 @@
       }
     }
 
-    function captureSelfie() {
+    function captureSelfie(automatic = false) {
+      if (autoCaptureInProgress) return;
       const video = document.getElementById("cameraVideo");
       const canvas = document.getElementById("cameraCanvas");
       const preview = document.getElementById("selfiePreview");
@@ -861,9 +870,15 @@
         return;
       }
       if (!video.videoWidth || !video.videoHeight) {
+        if (automatic) {
+          autoCaptureInProgress = false;
+          document.getElementById("captureButton").disabled = false;
+          document.getElementById("captureButton").innerHTML = '<i data-lucide="camera"></i> Ambil Selfie';
+        }
         Swal.fire({ icon:"warning", title:"Kamera belum siap", text:"Tunggu beberapa detik lalu coba lagi." });
         return;
       }
+      autoCaptureInProgress = true;
 
       // Center-crop ke rasio 3:4 agar foto tidak meregang/memanjang.
       const targetWidth = 720, targetHeight = 960, targetRatio = targetWidth / targetHeight;
@@ -895,6 +910,7 @@
       document.getElementById("captureButton").style.display = "none";
       document.getElementById("retakeButton").style.display = "inline-flex";
       document.getElementById("continuePinButton").style.display = "inline-flex";
+      setLivenessStatus("Foto berhasil diambil", "Lanjutkan ke PIN", 100, "verified");
       stopCameraStream();
       updateSubmitButton();
       lucide.createIcons();

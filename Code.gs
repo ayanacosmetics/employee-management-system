@@ -2898,7 +2898,7 @@ function getSystemHealth_() {
 
   return {
     success: true,
-    version: "12.6.1-pin-controls",
+    version: "12.6.2-auto-capture",
     timezone: Session.getScriptTimeZone(),
     adminConfigured: getAdminSetupStatus_().configured,
     emailQuota,
