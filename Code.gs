@@ -25,7 +25,7 @@ function doGet(e) {
   const adminGetActions = [
     "listKaryawanAdmin", "getDashboard", "getRiwayatAbsensiAdmin",
     "getJadwalAdmin", "listIzinAdmin", "listPengumuman",
-    "getPayrollAdmin", "getPengaturanAdmin", "getSystemHealth", "listAdminAccounts"
+    "getPayrollAdmin", "getPengaturanAdmin", "getSystemHealth", "listAdminAccounts", "getSelfieAdmin"
   ];
   if (adminGetActions.indexOf(action) !== -1) {
     const auth = requireAdmin_(e.parameter.adminToken);
@@ -102,6 +102,12 @@ function doGet(e) {
         cari: e.parameter.cari
       })
     );
+  }
+
+  // Mengambil selfie sebagai data URL agar dapat dilihat langsung di web admin.
+  // URL Drive lama tetap didukung dan file tidak perlu dibuat publik.
+  if (action === "getSelfieAdmin") {
+    return json(getSelfieAdmin_(e.parameter.source));
   }
 
   // Endpoint administrasi jadwal shift. Tidak mengubah endpoint shift karyawan yang dipakai absensi.
@@ -1313,6 +1319,77 @@ function json(obj) {
  * Tidak mengubah struktur sheet dan tidak menggantikan endpoint riwayat karyawan lama.
  * Setiap baris Absensi diubah menjadi maksimal dua item: MASUK dan PULANG.
  */
+function getSelfieAdmin_(source) {
+  try {
+    const raw = String(source || "").trim();
+    if (!raw) {
+      return { success: false, message: "Referensi foto tidak tersedia." };
+    }
+
+    const fileId = extractDriveFileId_(raw);
+    if (!fileId) {
+      return {
+        success: false,
+        message: "Format tautan selfie tidak dikenali.",
+        driveUrl: raw
+      };
+    }
+
+    const file = DriveApp.getFileById(fileId);
+    const blob = file.getBlob();
+    const mimeType = String(blob.getContentType() || "image/jpeg");
+
+    if (!mimeType.toLowerCase().startsWith("image/")) {
+      return { success: false, message: "File selfie bukan gambar yang valid." };
+    }
+
+    // Mencegah respons JSON terlalu besar dan menjaga performa Apps Script.
+    const maxBytes = 5 * 1024 * 1024;
+    if (blob.getBytes().length > maxBytes) {
+      return {
+        success: false,
+        message: "Ukuran foto terlalu besar untuk ditampilkan langsung.",
+        driveUrl: file.getUrl()
+      };
+    }
+
+    return {
+      success: true,
+      name: file.getName(),
+      mimeType,
+      dataUrl: `data:${mimeType};base64,${Utilities.base64Encode(blob.getBytes())}`
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: "Foto tidak dapat dibuka. Pastikan file masih tersedia di Google Drive.",
+      detail: String(error && error.message ? error.message : error)
+    };
+  }
+}
+
+function extractDriveFileId_(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  // Mendukung ID langsung serta berbagai bentuk URL Google Drive lama.
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(text)) return text;
+
+  const patterns = [
+    /\/d\/([a-zA-Z0-9_-]{20,})/,
+    /[?&]id=([a-zA-Z0-9_-]{20,})/,
+    /\/file\/d\/([a-zA-Z0-9_-]{20,})/,
+    /open\?id=([a-zA-Z0-9_-]{20,})/
+  ];
+
+  for (let i = 0; i < patterns.length; i++) {
+    const match = text.match(patterns[i]);
+    if (match && match[1]) return match[1];
+  }
+
+  return "";
+}
+
 function getRiwayatAbsensiAdmin_(filter) {
   filter = filter || {};
 

@@ -376,15 +376,53 @@
       lucide.createIcons();
     }
 
-    function showPhoto(url, nama) {
+    async function showPhoto(url, nama) {
+      const source = String(url || "").trim();
+      if (!source) return;
+
       Swal.fire({
-        title: `Selfie ${nama}`,
-        imageUrl: url,
-        imageAlt: `Selfie absensi ${nama}`,
-        imageWidth: 360,
-        confirmButtonText: "Tutup",
-        confirmButtonColor: "#6d28d9"
+        title: "Memuat selfie",
+        text: "Mohon tunggu sebentar...",
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
       });
+
+      try {
+        const apiUrl = new URL(EMS_API_URL);
+        apiUrl.searchParams.set("action", "getSelfieAdmin");
+        apiUrl.searchParams.set("source", source);
+        apiUrl.searchParams.set("t", String(Date.now()));
+
+        const response = await fetch(apiUrl.toString(), { cache: "no-store" });
+        const result = await response.json();
+
+        if (!result.success || !result.dataUrl) {
+          throw new Error(result.message || "Selfie tidak dapat dimuat.");
+        }
+
+        await Swal.fire({
+          title: `Selfie ${nama}`,
+          imageUrl: result.dataUrl,
+          imageAlt: `Selfie absensi ${nama}`,
+          imageWidth: 360,
+          imageHeight: 480,
+          imageClass: "history-selfie-preview",
+          confirmButtonText: "Tutup",
+          confirmButtonColor: "#6d28d9"
+        });
+      } catch (error) {
+        const fallback = source.startsWith("http")
+          ? `<a href="${escapeHtml(source)}" target="_blank" rel="noopener">Buka file di Google Drive</a>`
+          : "";
+
+        Swal.fire({
+          icon: "error",
+          title: "Selfie tidak dapat dibuka",
+          html: `${escapeHtml(error.message || "Terjadi kesalahan saat memuat foto.")} ${fallback}`,
+          confirmButtonText: "Tutup",
+          confirmButtonColor: "#6d28d9"
+        });
+      }
     }
 
     function goToPage(page) {
