@@ -143,6 +143,13 @@
       document.querySelectorAll(".qr-card.print-active").forEach(card => {
         card.classList.remove("print-active");
       });
+
+      document.querySelectorAll("img.qr-print-fallback").forEach(image => {
+        image.remove();
+      });
+
+      document.documentElement.classList.remove("is-printing-qr");
+      document.body.classList.remove("is-printing-qr");
       activePrintCard = null;
     }
 
@@ -155,6 +162,8 @@
       activePrintCard = target;
       prepareQrForPrint(target);
       target.classList.add("print-active");
+      document.documentElement.classList.add("is-printing-qr");
+      document.body.classList.add("is-printing-qr");
 
       requestAnimationFrame(() => {
         requestAnimationFrame(() => window.print());
@@ -162,6 +171,27 @@
     }
 
     window.addEventListener("afterprint", clearPrintState);
+
+    const printMedia = window.matchMedia ? window.matchMedia("print") : null;
+    if (printMedia) {
+      const handlePrintChange = event => {
+        if (!event.matches) {
+          window.setTimeout(clearPrintState, 50);
+        }
+      };
+
+      if (typeof printMedia.addEventListener === "function") {
+        printMedia.addEventListener("change", handlePrintChange);
+      } else if (typeof printMedia.addListener === "function") {
+        printMedia.addListener(handlePrintChange);
+      }
+    }
+
+    window.addEventListener("focus", () => {
+      if (activePrintCard) {
+        window.setTimeout(clearPrintState, 250);
+      }
+    });
 
     loadQrToko();
   </script>

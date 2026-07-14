@@ -1222,3 +1222,126 @@ nav a.active {
   border-radius: 14px;
   background: #f3f4f6;
 }
+
+
+/* V11.3 QR print stability fix */
+.qr-print-fallback {
+  display: none !important;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html,
+  body,
+  body.qr-page {
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  .qr-shell,
+  .qr-grid {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .qr-card {
+    display: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    page-break-before: auto !important;
+    page-break-after: auto !important;
+    break-before: auto !important;
+    break-after: auto !important;
+  }
+
+  .qr-card.print-active {
+    display: block !important;
+    width: 100% !important;
+    height: 276mm !important;
+    max-height: 276mm !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  .qr-card.print-active .qr-poster-border {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 12mm 14mm !important;
+    box-sizing: border-box !important;
+    border-width: 3px !important;
+    border-radius: 16px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+  }
+
+  .qr-card.print-active .qr-poster-header {
+    margin-bottom: 10px !important;
+  }
+
+  .qr-card.print-active .qr-poster-header h2 {
+    font-size: 23px !important;
+  }
+
+  .qr-card.print-active .qr-poster-store h3 {
+    font-size: 25px !important;
+  }
+
+  .qr-card.print-active .qr-poster-instruction {
+    margin-bottom: 10px !important;
+  }
+
+  .qr-card.print-active .qr-code-box {
+    width: 300px !important;
+    min-height: 300px !important;
+    height: 300px !important;
+    padding: 12px !important;
+    margin: 10px auto !important;
+    box-sizing: border-box !important;
+  }
+
+  .qr-card.print-active .qr-code-box canvas {
+    display: none !important;
+  }
+
+  .qr-card.print-active .qr-code-box img.qr-print-fallback {
+    display: block !important;
+    width: 276px !important;
+    height: 276px !important;
+    max-width: none !important;
+    object-fit: contain !important;
+  }
+
+  .qr-card.print-active .qr-code-box img:not(.qr-print-fallback) {
+    display: none !important;
+  }
+
+  .qr-card.print-active .qr-poster-id {
+    margin: 6px 0 10px !important;
+  }
+
+  .qr-card.print-active .qr-poster-steps {
+    margin-top: 4px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .qr-card.print-active .qr-poster-note {
+    margin-bottom: 0 !important;
+    padding: 9px 12px !important;
+  }
+}
