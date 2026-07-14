@@ -2898,7 +2898,7 @@ function getSystemHealth_() {
 
   return {
     success: true,
-    version: "12.6-face-liveness",
+    version: "12.6.1-pin-controls",
     timezone: Session.getScriptTimeZone(),
     adminConfigured: getAdminSetupStatus_().configured,
     emailQuota,
