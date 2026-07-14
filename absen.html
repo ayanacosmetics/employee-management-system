@@ -344,6 +344,12 @@
         params.get("toko") ||
         DEFAULT_TOKO_ID;
 
+    function getLocalDateValue() {
+      const now = new Date();
+      const offset = now.getTimezoneOffset();
+      return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10);
+    }
+
     function readPortalSession() {
       try {
         const value = JSON.parse(localStorage.getItem("ems_portal_session") || "null");
@@ -847,18 +853,43 @@
           idToko: tokoId,
           tanggal: getLocalDateValue()
         });
-        const contextResponse = await fetch(`${EMS_API_URL}?${params.toString()}`);
-        const contextData = await contextResponse.json();
+        let contextData = null;
+        try {
+          const contextResponse = await fetch(`${EMS_API_URL}?${params.toString()}`);
+          contextData = await contextResponse.json();
+        } catch (_) {}
         if (token !== shiftRequestToken) return;
-        if (!contextData.success) {
-          currentEmployee = null;
-          currentShift = null;
-          document.getElementById("shiftName").innerText = "-";
-          document.getElementById("shiftStart").innerText = "-";
-          document.getElementById("shiftEnd").innerText = "-";
-          document.getElementById("shiftStatus").innerText = contextData.storeMismatch ? "Tidak terdaftar di toko ini" : (contextData.message || "PIN tidak ditemukan");
-          return;
+
+        // Fallback kompatibilitas: dipakai bila endpoint gabungan belum ter-deploy
+        // atau data shift dari endpoint baru tidak lengkap.
+        if (!contextData?.karyawan || !contextData?.shift) {
+          if (contextData && contextData.success === false && (contextData.storeMismatch || /PIN salah|PIN tidak valid|tidak aktif/i.test(contextData.message || ""))) {
+            currentEmployee = null;
+            currentShift = null;
+            document.getElementById("shiftName").innerText = "-";
+            document.getElementById("shiftStart").innerText = "-";
+            document.getElementById("shiftEnd").innerText = "-";
+            document.getElementById("shiftStatus").innerText = contextData.storeMismatch ? "Tidak terdaftar di toko ini" : (contextData.message || "PIN tidak ditemukan");
+            return;
+          }
+          const employeeResponse = await fetch(`${EMS_API_URL}?action=getKaryawanByPin&tenantCode=${encodeURIComponent(tenantCode)}&pin=${encodeURIComponent(currentPin)}`);
+          const employeeData = await employeeResponse.json();
+          if (!employeeData.success) throw new Error(employeeData.message || "PIN tidak ditemukan.");
+          if (String(employeeData.karyawan.idToko || "").trim() !== String(tokoId || "").trim()) {
+            currentEmployee = null;
+            currentShift = null;
+            document.getElementById("shiftName").innerText = "-";
+            document.getElementById("shiftStart").innerText = "-";
+            document.getElementById("shiftEnd").innerText = "-";
+            document.getElementById("shiftStatus").innerText = "Tidak terdaftar di toko ini";
+            return;
+          }
+          const shiftResponse = await fetch(`${EMS_API_URL}?action=getShiftKaryawan&tenantCode=${encodeURIComponent(tenantCode)}&idKaryawan=${encodeURIComponent(employeeData.karyawan.id)}&tanggal=${encodeURIComponent(getLocalDateValue())}`);
+          const shiftData = await shiftResponse.json();
+          if (!shiftData.success || !shiftData.shift) throw new Error(shiftData.message || "Shift tidak ditemukan.");
+          contextData = { success:true, karyawan:employeeData.karyawan, shift:shiftData.shift };
         }
+        if (token !== shiftRequestToken) return;
         currentEmployee = contextData.karyawan;
         currentShift = contextData.shift;
         document.getElementById("shiftName").innerText = currentShift.nama || "-";
@@ -868,6 +899,7 @@
         updateSubmitButton();
       } catch (error) {
         if (token !== shiftRequestToken) return;
+        console.error("Gagal memuat PIN dan shift:", error);
         currentEmployee = null;
         currentShift = null;
         document.getElementById("shiftName").innerText = "-";
