@@ -58,3 +58,7 @@ Owner Platform dapat membuat pelanggan baru. Sistem otomatis membuat spreadsheet
 - Audit Log Platform.
 - Fitur Login Sebagai pelanggan dengan pencatatan audit.
 - Seluruh modul tenant V11/V12 tetap dipertahankan.
+
+
+## V12.1.4
+Perbaikan sesi Owner Platform menggunakan opaque server-side token.

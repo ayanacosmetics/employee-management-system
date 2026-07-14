@@ -2704,20 +2704,25 @@ function platformBase64Decode_(value){
   while(text.length%4)text+="=";
   return Utilities.base64DecodeWebSafe(text);
 }
+function platformSessionKey_(token){
+  const digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(token||""),Utilities.Charset.UTF_8);
+  return "EMS_PLATFORM_SESSION_"+Utilities.base64EncodeWebSafe(digest).replace(/=+$/g,"");
+}
 function makePlatformToken_(admin){
+  // Token opaque yang disimpan server-side. Lebih stabil daripada token
+  // bertanda tangan yang harus direkonstruksi pada setiap request Apps Script.
+  const token=[Utilities.getUuid(),Utilities.getUuid(),Utilities.getUuid()].join("");
   const payload={
     username:String(admin.username||"").trim().toLowerCase(),
     version:Number(admin.version)||1,
     scope:"PLATFORM_OWNER",
-    iat:Date.now()
+    createdAt:Date.now()
   };
-  const body=Utilities.base64EncodeWebSafe(JSON.stringify(payload)).replace(/=+$/g,"");
-  const sig=Utilities.base64EncodeWebSafe(
-    Utilities.computeHmacSha256Signature(body,getPlatformSecret_())
-  ).replace(/=+$/g,"");
-  return body+"."+sig;
+  PropertiesService.getScriptProperties().setProperty(platformSessionKey_(token),JSON.stringify(payload));
+  return token;
 }
-function verifyPlatformToken_(token){
+function verifyLegacyPlatformToken_(token){
+  // Kompatibilitas sementara untuk token V12.1.3 yang masih tersimpan.
   try{
     const parts=String(token||"").trim().split(".");
     if(parts.length!==2||!parts[0]||!parts[1])return null;
@@ -2726,8 +2731,22 @@ function verifyPlatformToken_(token){
     ).replace(/=+$/g,"");
     if(expected!==parts[1])return null;
     const jsonText=Utilities.newBlob(platformBase64Decode_(parts[0])).getDataAsString("UTF-8");
-    const payload=JSON.parse(jsonText);
-    if(payload.scope!=="PLATFORM_OWNER"||!payload.username)return null;
+    return JSON.parse(jsonText);
+  }catch(_){return null;}
+}
+function verifyPlatformToken_(token){
+  try{
+    const clean=String(token||"").trim();
+    if(!clean)return null;
+    const props=PropertiesService.getScriptProperties();
+    let payload=null;
+    const stored=props.getProperty(platformSessionKey_(clean));
+    if(stored){
+      payload=JSON.parse(stored);
+    }else{
+      payload=verifyLegacyPlatformToken_(clean);
+    }
+    if(!payload||payload.scope!=="PLATFORM_OWNER"||!payload.username)return null;
     const admin=findPlatformAdmin_(String(payload.username).trim().toLowerCase());
     if(!admin||admin.status.toLowerCase()!=="aktif")return null;
     if((Number(admin.version)||1)!==(Number(payload.version)||1))return null;
@@ -2736,6 +2755,9 @@ function verifyPlatformToken_(token){
     console.log("verifyPlatformToken_:",error&&error.message?error.message:error);
     return null;
   }
+}
+function revokePlatformToken_(token){
+  try{PropertiesService.getScriptProperties().deleteProperty(platformSessionKey_(token));}catch(_){}
 }
 function requirePlatform_(token){const admin=verifyPlatformToken_(token);return admin?{success:true,admin}:{success:false,sessionExpired:true,message:"Sesi Owner Platform tidak valid."};}
 function validatePlatformSession_(token){const r=requirePlatform_(token);return r.success?{success:true,username:r.admin.username,nama:r.admin.nama}:r;}
