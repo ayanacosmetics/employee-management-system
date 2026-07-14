@@ -167,11 +167,15 @@ function doGet(e) {
   const adminGetActions = [
     "listKaryawanAdmin", "getDashboard", "getRiwayatAbsensiAdmin",
     "getJadwalAdmin", "listIzinAdmin", "listPengumuman",
-    "getPayrollAdmin", "getPengaturanAdmin", "getSystemHealth", "listAdminAccounts", "getSelfieAdmin"
+    "getPayrollAdmin", "getPengaturanAdmin", "getSystemHealth", "listAdminAccounts", "getSelfieAdmin", "listCabangAdmin"
   ];
   if (adminGetActions.indexOf(action) !== -1) {
     const auth = requireAdmin_(e.parameter.adminToken);
     if (!auth.success) return json(auth);
+  }
+
+  if (action === "listCabangAdmin") {
+    return json(listCabangAdmin_());
   }
 
   if (action === "listToko") {
@@ -363,7 +367,7 @@ function doPost(e) {
     "saveKaryawan", "setStatusKaryawan", "saveJadwalBatch",
     "updateStatusIzin", "savePengumuman", "deletePengumuman",
     "savePayrollBatch", "savePengaturanAdmin", "testWhatsApp",
-    "notifyPayroll", "sendPayrollEmail", "saveAdminAccount"
+    "notifyPayroll", "sendPayrollEmail", "saveAdminAccount", "saveCabangAdmin", "setStatusCabangAdmin"
   ];
   if (adminPostActions.indexOf(action) !== -1) {
     const auth = requireAdmin_(data.adminToken);
@@ -440,6 +444,14 @@ function doPost(e) {
     return json(saveAdminAccount_(data));
   }
 
+  if (action === "saveCabangAdmin") {
+    return json(saveCabangAdmin_(data));
+  }
+
+  if (action === "setStatusCabangAdmin") {
+    return json(setStatusCabangAdmin_(data));
+  }
+
   return json({
     success: false,
     message: "Action tidak dikenal."
@@ -448,7 +460,7 @@ function doPost(e) {
 
 function getToko_(idToko) {
   const sh = getSheet_(SHEET_TOKO);
-  const rows = getRows_(sh, 6);
+  const rows = getRows_(sh, 7);
 
   const idCari = String(idToko || "")
     .trim()
@@ -459,10 +471,11 @@ function getToko_(idToko) {
   );
 
   if (!row) {
-    return {
-      success: false,
-      message: "Toko tidak ditemukan."
-    };
+    return { success: false, message: "Cabang tidak ditemukan." };
+  }
+  const status = String(row[6] || "Aktif").trim();
+  if (status.toLowerCase() !== "aktif") {
+    return { success:false, message:"Cabang sedang nonaktif." };
   }
 
   return {
@@ -1430,23 +1443,73 @@ function formatFileTime_(date) {
 
 function listToko_() {
   const sh = getSheet_(SHEET_TOKO);
-  const rows = getRows_(sh, 6);
-
+  const rows = getRows_(sh, 7);
   const items = rows
     .filter(row => String(row[0] || "").trim())
+    .filter(row => String(row[6] || "Aktif").trim().toLowerCase() === "aktif")
     .map(row => ({
       id: String(row[0] || "").trim(),
       nama: String(row[1] || "").trim(),
       alamat: String(row[2] || "").trim(),
       latitude: Number(row[3]) || 0,
       longitude: Number(row[4]) || 0,
-      radius: Number(row[5]) || 50
+      radius: Number(row[5]) || 50,
+      status: String(row[6] || "Aktif").trim()
     }));
+  return { success: true, items };
+}
 
-  return {
-    success: true,
-    items
-  };
+function listCabangAdmin_() {
+  const tenant = getTenantContext_();
+  const rows = getRows_(getSheet_(SHEET_TOKO), 7);
+  const items = rows.filter(r => String(r[0]||"").trim()).map(r => ({
+    id:String(r[0]||"").trim(), nama:String(r[1]||"").trim(), alamat:String(r[2]||"").trim(),
+    latitude:Number(r[3])||0, longitude:Number(r[4])||0, radius:Number(r[5])||50,
+    status:String(r[6]||"Aktif").trim()
+  }));
+  return {success:true,items,usage:{used:items.length,max:Number(tenant.maxStores)||0}};
+}
+function nextCabangId_(rows){
+  let max=0;
+  rows.forEach(r=>{const m=String(r[0]||"").trim().match(/^T(\d+)$/i);if(m)max=Math.max(max,Number(m[1])||0);});
+  return "T"+String(max+1).padStart(3,"0");
+}
+function saveCabangAdmin_(data){
+  const sh=getSheet_(SHEET_TOKO), rows=getRows_(sh,7), original=String(data.originalId||"").trim();
+  const nama=String(data.nama||"").trim(), alamat=String(data.alamat||"").trim();
+  const latitude=Number(data.latitude), longitude=Number(data.longitude), radius=Math.max(1,Number(data.radius)||50);
+  const status=String(data.status||"Aktif").trim()==="Nonaktif"?"Nonaktif":"Aktif";
+  if(!nama)return{success:false,message:"Nama cabang wajib diisi."};
+  if(!Number.isFinite(latitude)||!Number.isFinite(longitude))return{success:false,message:"Koordinat latitude dan longitude wajib valid."};
+  const tenant=getTenantContext_();
+  if(!original && tenant.maxStores>0 && rows.filter(r=>String(r[0]||"").trim()).length>=tenant.maxStores){
+    return{success:false,message:`Batas paket tercapai. Maksimal ${tenant.maxStores} cabang.`};
+  }
+  let id=original || nextCabangId_(rows);
+  const duplicate=rows.find(r=>String(r[0]||"").trim()!==original && String(r[1]||"").trim().toLowerCase()===nama.toLowerCase());
+  if(duplicate)return{success:false,message:"Nama cabang sudah digunakan."};
+  if(original){
+    const idx=rows.findIndex(r=>String(r[0]||"").trim()===original);
+    if(idx<0)return{success:false,message:"Cabang tidak ditemukan."};
+    sh.getRange(idx+2,1,1,7).setValues([[id,nama,alamat,latitude,longitude,radius,status]]);
+    simpanLog_(data.adminUser||"Admin","Mengubah cabang",`${id} | ${nama} | ${status}`);
+    return{success:true,message:"Cabang berhasil diperbarui.",item:{id,nama,status}};
+  }
+  sh.appendRow([id,nama,alamat,latitude,longitude,radius,status]);
+  simpanLog_(data.adminUser||"Admin","Menambah cabang",`${id} | ${nama}`);
+  return{success:true,message:"Cabang berhasil ditambahkan.",item:{id,nama,status}};
+}
+function setStatusCabangAdmin_(data){
+  const id=String(data.id||"").trim(), status=String(data.status||"").trim()==="Nonaktif"?"Nonaktif":"Aktif";
+  const sh=getSheet_(SHEET_TOKO), rows=getRows_(sh,7), idx=rows.findIndex(r=>String(r[0]||"").trim()===id);
+  if(idx<0)return{success:false,message:"Cabang tidak ditemukan."};
+  if(status==="Nonaktif"){
+    const active=rows.filter(r=>String(r[0]||"").trim() && String(r[6]||"Aktif").trim().toLowerCase()==="aktif").length;
+    if(active<=1)return{success:false,message:"Minimal satu cabang harus tetap aktif."};
+  }
+  sh.getRange(idx+2,7).setValue(status);
+  simpanLog_(data.adminUser||"Admin","Mengubah status cabang",`${id} | ${status}`);
+  return{success:true,message:`Cabang berhasil ${status==="Aktif"?"diaktifkan":"dinonaktifkan"}.`};
 }
 
 function json(obj) {
@@ -2595,13 +2658,14 @@ function sendPayrollEmail_(data){
 function ensureSystemSchema_() {
   ensureTenantRegistry_();
   const cache = CacheService.getScriptCache();
-  if (cache.get("EMS_SCHEMA_V11_OK") === "1") return;
+  if (cache.get("EMS_SCHEMA_V12_2_OK") === "1") return;
 
   const lock = LockService.getScriptLock();
   try {
     lock.tryLock(5000);
-    if (cache.get("EMS_SCHEMA_V11_OK") === "1") return;
+    if (cache.get("EMS_SCHEMA_V12_2_OK") === "1") return;
 
+    ensureSheetHeader_(SHEET_TOKO, ["ID Toko","Nama Toko","Alamat","Latitude","Longitude","Radius","Status"]);
     ensureKaryawanEmailColumn_();
     ensureSheetHeader_(SHEET_PAYROLL, ["Periode","ID Karyawan","Nama","ID Toko","Hadir","Terlambat","Total Durasi","Gaji Pokok","Tunjangan","Potongan","Gaji Bersih","Status","Catatan","Disimpan Pada"]);
     ensureSheetHeader_(SHEET_PENGUMUMAN, ["ID","Judul","Isi","Target Toko","Tanggal Mulai","Tanggal Selesai","Status","Dibuat Pada"]);
@@ -2610,7 +2674,7 @@ function ensureSystemSchema_() {
     ensureSheetHeader_(SHEET_ADMIN, ["Username","Password Hash","Salt","Nama","Role","Status","Version","Dibuat Pada","Login Terakhir"]);
     migrateLegacyAdmin_();
 
-    cache.put("EMS_SCHEMA_V11_OK", "1", 300);
+    cache.put("EMS_SCHEMA_V12_2_OK", "1", 300);
   } catch (error) {
     console.error("Migrasi schema V9.1 dilewati:", error);
   } finally {
@@ -2838,7 +2902,7 @@ function nextTenantId_(){
   const nums=platformTenantRows_().map(r=>Number(String(r[0]||"").replace(/\D/g,""))||0);return"PLG"+String(Math.max(0,...nums)+1).padStart(3,"0");
 }
 function tenantHeaders_(){return{
-  "Toko":["ID Toko","Nama Toko","Alamat","Latitude","Longitude","Radius"],
+  "Toko":["ID Toko","Nama Toko","Alamat","Latitude","Longitude","Radius","Status"],
   "Karyawan":["ID Karyawan","Barcode","Nama","PIN","Jabatan","Shift Default","Status","No HP","Foto","ID Toko","Email"],
   "Shift":["Nama Shift","Jam Masuk","Jam Pulang","Batas Terlambat"],
   "Jadwal":["Tanggal","ID Karyawan","Shift"],

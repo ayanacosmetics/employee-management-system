@@ -69,3 +69,7 @@ Perbaikan sesi Owner Platform menggunakan opaque server-side token.
 - Pelanggan baru memperoleh spreadsheet terpisah.
 - Duplikasi registry pelanggan dibersihkan otomatis berdasarkan ID/kode pelanggan.
 - Penyimpanan pelanggan memakai lock, validasi unik, pesan progres, dan rollback jika provisioning gagal.
+
+
+## V12.2 Manajemen Cabang
+Owner/Admin pelanggan dapat menambah, mengedit, mengaktifkan, dan menonaktifkan cabang sesuai batas paket. Struktur lama Toko tetap dipertahankan dan hanya ditambah kolom Status.
