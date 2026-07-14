@@ -2641,7 +2641,7 @@ function authorizeEmailAccess() {
 
 
 // ============================================================
-// EMS V12.1 - PANEL OWNER PLATFORM
+// EMS V12.1.3 - PANEL OWNER PLATFORM SESSION FIX
 // Lapisan terpisah dari admin pelanggan. Tidak mengubah endpoint tenant lama.
 // ============================================================
 
@@ -2681,26 +2681,61 @@ function getPlatformSetupStatus_(){
   return{success:true,configured:platformAdminRows_().some(r=>String(r[0]||"").trim()&&String(r[4]||"Aktif").toLowerCase()==="aktif")};
 }
 function getPlatformSecret_(){
-  const p=PropertiesService.getScriptProperties(); let s=p.getProperty("EMS_PLATFORM_SECRET");
-  if(!s){s=Utilities.getUuid()+Utilities.getUuid();p.setProperty("EMS_PLATFORM_SECRET",s);} return s;
+  const props=PropertiesService.getScriptProperties();
+  let secret=String(props.getProperty("EMS_PLATFORM_SECRET")||"");
+  if(secret)return secret;
+
+  // Hindari dua request pertama membuat secret berbeda secara bersamaan.
+  const lock=LockService.getScriptLock();
+  lock.waitLock(10000);
+  try{
+    secret=String(props.getProperty("EMS_PLATFORM_SECRET")||"");
+    if(!secret){
+      secret=Utilities.getUuid()+Utilities.getUuid()+Utilities.getUuid();
+      props.setProperty("EMS_PLATFORM_SECRET",secret);
+    }
+    return secret;
+  }finally{
+    lock.releaseLock();
+  }
+}
+function platformBase64Decode_(value){
+  let text=String(value||"");
+  while(text.length%4)text+="=";
+  return Utilities.base64DecodeWebSafe(text);
 }
 function makePlatformToken_(admin){
-  const payload={username:admin.username,version:admin.version,scope:"PLATFORM_OWNER",iat:Date.now()};
+  const payload={
+    username:String(admin.username||"").trim().toLowerCase(),
+    version:Number(admin.version)||1,
+    scope:"PLATFORM_OWNER",
+    iat:Date.now()
+  };
   const body=Utilities.base64EncodeWebSafe(JSON.stringify(payload)).replace(/=+$/g,"");
-  const sig=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(body,getPlatformSecret_())).replace(/=+$/g,"");
+  const sig=Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(body,getPlatformSecret_())
+  ).replace(/=+$/g,"");
   return body+"."+sig;
 }
 function verifyPlatformToken_(token){
   try{
-    const parts=String(token||"").split("."); if(parts.length!==2)return null;
-    const expected=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(parts[0],getPlatformSecret_())).replace(/=+$/g,"");
+    const parts=String(token||"").trim().split(".");
+    if(parts.length!==2||!parts[0]||!parts[1])return null;
+    const expected=Utilities.base64EncodeWebSafe(
+      Utilities.computeHmacSha256Signature(parts[0],getPlatformSecret_())
+    ).replace(/=+$/g,"");
     if(expected!==parts[1])return null;
-    const payload=JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+    const jsonText=Utilities.newBlob(platformBase64Decode_(parts[0])).getDataAsString("UTF-8");
+    const payload=JSON.parse(jsonText);
     if(payload.scope!=="PLATFORM_OWNER"||!payload.username)return null;
-    const admin=findPlatformAdmin_(payload.username);
-    if(!admin||admin.status.toLowerCase()!=="aktif"||admin.version!==(Number(payload.version)||1))return null;
+    const admin=findPlatformAdmin_(String(payload.username).trim().toLowerCase());
+    if(!admin||admin.status.toLowerCase()!=="aktif")return null;
+    if((Number(admin.version)||1)!==(Number(payload.version)||1))return null;
     return admin;
-  }catch(_){return null;}
+  }catch(error){
+    console.log("verifyPlatformToken_:",error&&error.message?error.message:error);
+    return null;
+  }
 }
 function requirePlatform_(token){const admin=verifyPlatformToken_(token);return admin?{success:true,admin}:{success:false,sessionExpired:true,message:"Sesi Owner Platform tidak valid."};}
 function validatePlatformSession_(token){const r=requirePlatform_(token);return r.success?{success:true,username:r.admin.username,nama:r.admin.nama}:r;}

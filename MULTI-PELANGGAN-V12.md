@@ -1,3 +1,7 @@
+## V12.1.3 – Platform Session Stability
+
+Memperbaiki sesi Owner Platform yang langsung kembali ke login, tanpa mengubah modul pelanggan.
+
 # EMS V12.0 — Multi-Pelanggan Foundation
 
 ## Kompatibilitas instalasi lama
