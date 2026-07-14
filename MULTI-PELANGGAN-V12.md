@@ -73,3 +73,7 @@ Perbaikan sesi Owner Platform menggunakan opaque server-side token.
 
 ## V12.2 Manajemen Cabang
 Owner/Admin pelanggan dapat menambah, mengedit, mengaktifkan, dan menonaktifkan cabang sesuai batas paket. Struktur lama Toko tetap dipertahankan dan hanya ditambah kolom Status.
+
+
+## V12.2.1
+Perbaikan navigasi: menu Cabang ditampilkan pada seluruh halaman admin pelanggan.
