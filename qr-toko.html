@@ -118,21 +118,50 @@
       }
     }
 
-    function printQr(index) {
-      document.querySelectorAll(".qr-card").forEach(card => {
+    let activePrintCard = null;
+
+    function prepareQrForPrint(card) {
+      card.querySelectorAll("canvas").forEach(canvas => {
+        const existingImage = canvas.parentElement.querySelector("img.qr-print-fallback");
+        if (existingImage) return;
+
+        try {
+          const image = document.createElement("img");
+          image.className = "qr-print-fallback";
+          image.alt = "QR Absensi Toko";
+          image.src = canvas.toDataURL("image/png");
+          image.style.width = `${canvas.width}px`;
+          image.style.height = `${canvas.height}px`;
+          canvas.insertAdjacentElement("afterend", image);
+        } catch (error) {
+          console.warn("QR tetap dicetak menggunakan canvas.", error);
+        }
+      });
+    }
+
+    function clearPrintState() {
+      document.querySelectorAll(".qr-card.print-active").forEach(card => {
         card.classList.remove("print-active");
       });
+      activePrintCard = null;
+    }
+
+    function printQr(index) {
+      clearPrintState();
 
       const target = document.querySelector(`.qr-card[data-store-index="${index}"]`);
       if (!target) return;
 
+      activePrintCard = target;
+      prepareQrForPrint(target);
       target.classList.add("print-active");
-      window.print();
 
-      setTimeout(() => {
-        target.classList.remove("print-active");
-      }, 500);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => window.print());
+      });
     }
+
+    window.addEventListener("afterprint", clearPrintState);
 
     loadQrToko();
   </script>

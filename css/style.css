@@ -646,8 +646,9 @@ nav a.active {
   }
 
   .print-ana .qr-card:first-child,
-  .print-ayana .qr-card:last-child {
-    display: block;
+  .print-ayana .qr-card:last-child,
+  .qr-card.print-active {
+    display: block !important;
   }
 
   .qr-code-box {
@@ -902,8 +903,9 @@ nav a.active {
   }
 
   .print-ana .qr-card:first-child,
-  .print-ayana .qr-card:last-child {
-    display: block;
+  .print-ayana .qr-card:last-child,
+  .qr-card.print-active {
+    display: block !important;
   }
 
   .qr-poster-border {
