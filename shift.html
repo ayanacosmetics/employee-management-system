@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Jadwal Shift - EMS</title>
   <link rel="stylesheet" href="css/style.css">
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body>
@@ -84,7 +84,7 @@
     async function loadSchedule(){
       const dates=weekDates();weekPicker.value=iso(currentMonday);periodLabel.textContent=`${formatDate(dates[0],{day:"numeric",month:"long"})} – ${formatDate(dates[6],{day:"numeric",month:"long",year:"numeric"})}`;
       scheduleBody.innerHTML=`<tr><td colspan="8" class="schedule-empty">Memuat jadwal...</td></tr>`;setDirty(false);
-      try{const data=await get({action:"getJadwalAdmin",tanggalMulai:iso(dates[0]),tanggalAkhir:iso(dates[6]),idToko:storeFilter.value});employees=data.karyawan||[];assignments={};(data.items||[]).forEach(x=>assignments[`${x.idKaryawan}|${x.tanggal}`]=x.shift);render();}
+      try{const data=await get({action:"getJadwalAdmin",tanggalMulai:iso(dates[0]),tanggalAkhir:iso(dates[6]),idToko:storeFilter.value});employees=data.karyawan||[];shifts=data.shifts||shifts;const selected=storeFilter.value;if(!stores.length){stores=data.stores||[];storeFilter.innerHTML=`<option value="">Semua Toko</option>${stores.map(x=>`<option value="${esc(x.id)}">${esc(x.nama)}</option>`).join("")}`;storeFilter.value=selected;}assignments={};(data.items||[]).forEach(x=>assignments[`${x.idKaryawan}|${x.tanggal}`]=x.shift);render();}
       catch(e){scheduleBody.innerHTML=`<tr><td colspan="8" class="schedule-empty error">${esc(e.message)}</td></tr>`;}
     }
     function render(){
@@ -107,7 +107,7 @@
       catch(e){Swal.fire("Gagal",e.message,"error");}
     }
     window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue="";}});
-    document.addEventListener("DOMContentLoaded",async()=>{lucide.createIcons();await loadReferences();await loadSchedule();});
+    document.addEventListener("DOMContentLoaded",async()=>{lucide.createIcons();await loadSchedule();});
   </script>
 </body>
 </html>

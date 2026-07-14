@@ -7,7 +7,7 @@
 
   <link rel="stylesheet" href="css/style.css">
 
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="js/config.js"></script>
 <style>
@@ -840,33 +840,27 @@
       document.getElementById("shiftName").innerText = "Memeriksa...";
       document.getElementById("shiftStatus").innerText = "Memuat data";
       try {
-        const employeeResponse = await fetch(`${EMS_API_URL}?action=getKaryawanByPin&tenantCode=${encodeURIComponent(tenantCode)}&pin=${encodeURIComponent(currentPin)}`);
-        const employeeData = await employeeResponse.json();
+        const params = new URLSearchParams({
+          action: "getPinAttendanceContext",
+          tenantCode,
+          pin: currentPin,
+          idToko: tokoId,
+          tanggal: getLocalDateValue()
+        });
+        const contextResponse = await fetch(`${EMS_API_URL}?${params.toString()}`);
+        const contextData = await contextResponse.json();
         if (token !== shiftRequestToken) return;
-        if (!employeeData.success) {
+        if (!contextData.success) {
           currentEmployee = null;
           currentShift = null;
           document.getElementById("shiftName").innerText = "-";
           document.getElementById("shiftStart").innerText = "-";
           document.getElementById("shiftEnd").innerText = "-";
-          document.getElementById("shiftStatus").innerText = "PIN tidak ditemukan";
+          document.getElementById("shiftStatus").innerText = contextData.storeMismatch ? "Tidak terdaftar di toko ini" : (contextData.message || "PIN tidak ditemukan");
           return;
         }
-        currentEmployee = employeeData.karyawan;
-        if (String(currentEmployee.idToko || "").trim() !== String(tokoId || "").trim()) {
-          currentEmployee = null;
-          currentShift = null;
-          document.getElementById("shiftName").innerText = "-";
-          document.getElementById("shiftStart").innerText = "-";
-          document.getElementById("shiftEnd").innerText = "-";
-          document.getElementById("shiftStatus").innerText = "Tidak terdaftar di toko ini";
-          return;
-        }
-        const shiftResponse = await fetch(`${EMS_API_URL}?action=getShiftKaryawan&tenantCode=${encodeURIComponent(tenantCode)}&idKaryawan=${encodeURIComponent(currentEmployee.id)}`);
-        const shiftData = await shiftResponse.json();
-        if (token !== shiftRequestToken) return;
-        if (!shiftData.success) throw new Error(shiftData.message || "Shift tidak ditemukan.");
-        currentShift = shiftData.shift;
+        currentEmployee = contextData.karyawan;
+        currentShift = contextData.shift;
         document.getElementById("shiftName").innerText = currentShift.nama || "-";
         document.getElementById("shiftStart").innerText = currentShift.masuk || "-";
         document.getElementById("shiftEnd").innerText = currentShift.pulang || "-";

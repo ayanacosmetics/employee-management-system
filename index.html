@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dashboard - EMS</title>
   <link rel="stylesheet" href="css/style.css">
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -104,6 +104,7 @@
   <script src="js/config.js"></script><script src="js/admin-auth.js"></script>
   <script>
     let dashboardTimer = null;
+    let dashboardController = null;
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
@@ -200,9 +201,12 @@
       document.getElementById("dashboardSubtitle").textContent = `Ringkasan kehadiran ${formatSelectedDate(tanggal)}`;
       if (manual) button.classList.add("loading");
 
+      if (dashboardController) dashboardController.abort();
+      dashboardController = new AbortController();
       const params = new URLSearchParams({ action:"getDashboard", tanggal, idToko });
+      if (manual) params.set("refresh", "1");
       try {
-        const response = await fetch(`${EMS_API_URL}?${params.toString()}&t=${Date.now()}`, { cache:"no-store" });
+        const response = await fetch(`${EMS_API_URL}?${params.toString()}&t=${Date.now()}`, { cache:"no-store", signal:dashboardController.signal });
         const data = await response.json();
         if (!data.success) throw new Error(data.message || "Dashboard gagal dimuat.");
         setSummary(data.summary || {});
@@ -211,6 +215,7 @@
         document.getElementById("lastUpdated").textContent = `Terakhir diperbarui ${new Date().toLocaleTimeString("id-ID", {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
         lucide.createIcons();
       } catch (error) {
+        if (error.name === "AbortError") return;
         document.getElementById("attendanceLatest").innerHTML = `<div class="dashboard-empty error"><i data-lucide="triangle-alert"></i><span>${escapeHtml(error.message)}</span></div>`;
         console.error(error);
         lucide.createIcons();
@@ -221,10 +226,9 @@
 
     async function initDashboard() {
       document.getElementById("filterTanggal").value = getLocalDateValue();
-      await loadDaftarToko();
-      await loadDashboard();
+      await Promise.all([loadDaftarToko(), loadDashboard()]);
       lucide.createIcons();
-      dashboardTimer = setInterval(() => loadDashboard(false), 30000);
+      dashboardTimer = setInterval(() => { if (!document.hidden) loadDashboard(false); }, 30000);
     }
 
     document.addEventListener("visibilitychange", () => {

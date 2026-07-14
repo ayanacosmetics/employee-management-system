@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Data Karyawan - EMS</title>
   <link rel="stylesheet" href="css/style.css">
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body>
@@ -140,7 +140,7 @@
     }
     function resetFilters(){ filterSearch.value="";filterStore.value="";filterStatus.value="";loadEmployees(); }
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeEmployeeModal();});
-    document.addEventListener("DOMContentLoaded",async()=>{lucide.createIcons();await loadReferences();await loadEmployees();});
+    document.addEventListener("DOMContentLoaded",async()=>{lucide.createIcons();await Promise.all([loadReferences(),loadEmployees()]);});
   </script>
 </body>
 </html>

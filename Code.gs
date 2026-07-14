@@ -15,6 +15,10 @@ const SHEET_PLATFORM_AUDIT = "Platform Audit";
 const DEFAULT_TENANT_ID = "PLG001";
 const DEFAULT_TENANT_CODE = "DEFAULT";
 let EMS_TENANT_CONTEXT = null;
+let EMS_MASTER_SPREADSHEET = null;
+let EMS_TENANT_SPREADSHEET = null;
+let EMS_TENANT_SPREADSHEET_ID = "";
+let EMS_SHEET_CACHE = {};
 
 function getMasterSpreadsheet_() {
   const props = PropertiesService.getScriptProperties();
@@ -24,7 +28,8 @@ function getMasterSpreadsheet_() {
     id = active.getId();
     props.setProperty("EMS_MASTER_SPREADSHEET_ID", id);
   }
-  return SpreadsheetApp.openById(id);
+  if (!EMS_MASTER_SPREADSHEET) EMS_MASTER_SPREADSHEET = SpreadsheetApp.openById(id);
+  return EMS_MASTER_SPREADSHEET;
 }
 function ensureMasterSheetHeader_(name, headers) {
   const ss = getMasterSpreadsheet_();
@@ -93,23 +98,49 @@ function repairTenantRegistry_(sheet) {
   return { removed: removeRows.length };
 }
 function normalizeTenantKey_(value){ return String(value||"").trim().toUpperCase(); }
+function tenantCacheKey_(key) {
+  return "EMS_TENANT_V12_3_" + normalizeTenantKey_(key || DEFAULT_TENANT_CODE);
+}
+function clearTenantCache_(tenant) {
+  const cache = CacheService.getScriptCache();
+  const item = tenant || {};
+  [item.id, item.code].filter(Boolean).forEach(key => cache.remove(tenantCacheKey_(key)));
+}
 function resolveTenant_(key) {
-  const sh = ensureTenantRegistry_();
   const search = normalizeTenantKey_(key || DEFAULT_TENANT_CODE);
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(tenantCacheKey_(search));
+  if (cached) {
+    try { return JSON.parse(cached); } catch (_) {}
+  }
+  const sh = ensureTenantRegistry_();
   const rows = sh.getLastRow() < 2 ? [] : sh.getRange(2,1,sh.getLastRow()-1,12).getValues();
   const row = rows.find(r => normalizeTenantKey_(r[0])===search || normalizeTenantKey_(r[1])===search);
   if (!row) return null;
-  return {
+  const tenant = {
     id:String(row[0]||"").trim(), code:String(row[1]||"").trim().toUpperCase(),
     name:String(row[2]||"").trim(), spreadsheetId:String(row[3]||"").trim(),
     folderId:String(row[4]||"").trim(), package:String(row[5]||"").trim(),
     status:String(row[6]||"Aktif").trim(), maxStores:Number(row[9])||0, maxEmployees:Number(row[10])||0
   };
+  const value = JSON.stringify(tenant);
+  cache.put(tenantCacheKey_(tenant.id), value, 300);
+  cache.put(tenantCacheKey_(tenant.code), value, 300);
+  return tenant;
 }
 function setTenantContext_(key) {
-  const tenant = resolveTenant_(key || DEFAULT_TENANT_CODE);
+  const search = normalizeTenantKey_(key || DEFAULT_TENANT_CODE);
+  if (EMS_TENANT_CONTEXT && [EMS_TENANT_CONTEXT.id, EMS_TENANT_CONTEXT.code].some(value => normalizeTenantKey_(value) === search)) {
+    return EMS_TENANT_CONTEXT;
+  }
+  const tenant = resolveTenant_(search);
   if (!tenant) throw new Error("Pelanggan tidak ditemukan.");
   if (tenant.status.toLowerCase() !== "aktif") throw new Error("Akun pelanggan sedang nonaktif.");
+  if (!EMS_TENANT_CONTEXT || EMS_TENANT_CONTEXT.spreadsheetId !== tenant.spreadsheetId) {
+    EMS_TENANT_SPREADSHEET = null;
+    EMS_TENANT_SPREADSHEET_ID = "";
+    EMS_SHEET_CACHE = {};
+  }
   EMS_TENANT_CONTEXT = tenant;
   return tenant;
 }
@@ -117,7 +148,12 @@ function getTenantContext_(){ return EMS_TENANT_CONTEXT || setTenantContext_(DEF
 function getTenantSpreadsheet_(){
   const tenant = getTenantContext_();
   if (!tenant.spreadsheetId) throw new Error("Spreadsheet pelanggan belum dikonfigurasi.");
-  return SpreadsheetApp.openById(tenant.spreadsheetId);
+  if (!EMS_TENANT_SPREADSHEET || EMS_TENANT_SPREADSHEET_ID !== tenant.spreadsheetId) {
+    EMS_TENANT_SPREADSHEET = SpreadsheetApp.openById(tenant.spreadsheetId);
+    EMS_TENANT_SPREADSHEET_ID = tenant.spreadsheetId;
+    EMS_SHEET_CACHE = {};
+  }
+  return EMS_TENANT_SPREADSHEET;
 }
 function tenantFromSignedToken_(token) {
   try {
@@ -194,6 +230,11 @@ function doGet(e) {
     return json(getKaryawanByPin_(e.parameter.pin));
   }
 
+  // V12.4: satu request ringan untuk memeriksa PIN sekaligus mengambil shift.
+  if (action === "getPinAttendanceContext") {
+    return json(getPinAttendanceContext_(e.parameter.pin, e.parameter.idToko, e.parameter.tanggal));
+  }
+
   // Endpoint administrasi karyawan. Endpoint absensi lama tetap dipertahankan.
   if (action === "listKaryawanAdmin") {
     return json(listKaryawanAdmin_({
@@ -220,7 +261,8 @@ function doGet(e) {
     return json(
       getDashboard_(
         e.parameter.tanggal,
-        e.parameter.idToko
+        e.parameter.idToko,
+        String(e.parameter.refresh || "") === "1"
       )
     );
   }
@@ -332,7 +374,6 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  ensureSystemSchema_();
   let data;
 
   try {
@@ -354,6 +395,7 @@ function doPost(e) {
   if (action === "platformImpersonateTenant") return json(platformImpersonateTenant_(data));
 
   try { initializeTenantForPost_(data); } catch (error) { return json({success:false,message:error.message}); }
+  ensureSystemSchema_();
 
   if (action === "setupAdmin") {
     return json(setupAdmin_(data));
@@ -515,28 +557,91 @@ function getKaryawanByBarcode_(barcode) {
   };
 }
 
-function getKaryawanByPin_(pin) {
-  const sh = getSheet_(SHEET_KARYAWAN);
-  const rows = getRows_(sh, 11);
-
+function findKaryawanRowByPin_(pin) {
   const pinCari = String(pin || "").trim();
+  if (!pinCari) return null;
+  const sh = getSheet_(SHEET_KARYAWAN);
+  const count = Math.max(0, sh.getLastRow() - 1);
+  if (!count) return null;
 
-  const row = rows.find(r =>
-    String(r[3] || "").trim() === pinCari &&
-    String(r[6] || "").trim().toLowerCase() === "aktif"
-  );
+  // Hanya baca kolom PIN (D) untuk seluruh karyawan, bukan semua 11 kolom.
+  const pins = sh.getRange(2, 4, count, 1).getDisplayValues();
+  const index = pins.findIndex(row => String(row[0] || "").trim() === pinCari);
+  if (index < 0) return null;
 
-  if (!row) {
-    return {
-      success: false,
-      message: "PIN salah atau karyawan tidak aktif."
-    };
+  // Setelah cocok, baca satu baris karyawan saja.
+  return sh.getRange(index + 2, 1, 1, 11).getValues()[0];
+}
+
+function getKaryawanByPin_(pin) {
+  const row = findKaryawanRowByPin_(pin);
+  if (!row || String(row[6] || "").trim().toLowerCase() !== "aktif") {
+    return { success:false, message:"PIN salah atau karyawan tidak aktif." };
+  }
+  return { success:true, karyawan:mapKaryawan_(row) };
+}
+
+function getShiftForEmployeeFast_(karyawan, tanggalInput) {
+  const tanggal = parseTanggal_(tanggalInput) || todayDate_();
+  const tanggalKey = normalizeDate_(tanggal);
+  let namaShift = String(karyawan.shiftDefault || "").trim();
+
+  const jadwal = getSheet_(SHEET_JADWAL);
+  const jadwalCount = Math.max(0, jadwal.getLastRow() - 1);
+  if (jadwalCount) {
+    // Cari kandidat hanya dari kolom ID Karyawan (B).
+    const ids = jadwal.getRange(2, 2, jadwalCount, 1).getDisplayValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || "").trim() !== karyawan.id) continue;
+      const row = jadwal.getRange(i + 2, 1, 1, 3).getValues()[0];
+      if (normalizeDate_(row[0]) === tanggalKey) {
+        namaShift = String(row[2] || "").trim() || namaShift;
+        break;
+      }
+    }
   }
 
-  return {
-    success: true,
-    karyawan: mapKaryawan_(row)
-  };
+  const shiftSheet = getSheet_(SHEET_SHIFT);
+  const shiftCount = Math.max(0, shiftSheet.getLastRow() - 1);
+  if (!shiftCount) return { success:false, message:"Data shift tidak ditemukan." };
+  // Cari nama shift hanya pada kolom A, lalu baca satu baris shift.
+  const names = shiftSheet.getRange(2, 1, shiftCount, 1).getDisplayValues();
+  const index = names.findIndex(row => String(row[0] || "").trim().toLowerCase() === namaShift.toLowerCase());
+  if (index < 0) return { success:false, message:"Data shift tidak ditemukan." };
+  const row = shiftSheet.getRange(index + 2, 1, 1, 4).getValues()[0];
+  return { success:true, shift:{
+    nama:String(row[0] || "").trim(),
+    masuk:formatJam_(row[1]), pulang:formatJam_(row[2]), telat:formatJam_(row[3])
+  }};
+}
+
+function getPinAttendanceContext_(pin, idTokoInput, tanggalInput) {
+  const pinCari = String(pin || "").trim();
+  const idToko = String(idTokoInput || "").trim();
+  if (!/^\d{4,8}$/.test(pinCari)) return {success:false,message:"PIN tidak valid."};
+
+  const tenant = getTenantContext_();
+  const tanggalKey = normalizeDate_(parseTanggal_(tanggalInput) || todayDate_());
+  const safePinKey = adminHash_(`${tenant.id}|${pinCari}`).slice(0, 24);
+  const cacheKey = `EMS_PIN_CONTEXT_V12_4_${tenant.id}_${idToko || "ANY"}_${tanggalKey}_${safePinKey}`;
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (_) {}
+  }
+
+  const employeeResult = getKaryawanByPin_(pinCari);
+  if (!employeeResult.success) return employeeResult;
+  const karyawan = employeeResult.karyawan;
+  if (idToko && String(karyawan.idToko || "").trim() !== idToko) {
+    return {success:false,message:"Tidak terdaftar di toko ini.",storeMismatch:true};
+  }
+  const shiftResult = getShiftForEmployeeFast_(karyawan, tanggalKey);
+  if (!shiftResult.success) return shiftResult;
+
+  const result = {success:true,karyawan,shift:shiftResult.shift,tanggal:tanggalKey};
+  cache.put(cacheKey, JSON.stringify(result), 45);
+  return result;
 }
 
 function getShiftKaryawan_(idKaryawan, tanggalInput) {
@@ -929,9 +1034,19 @@ function saveIzin_(data) {
   };
 }
 
-function getDashboard_(tanggalInput, idTokoInput) {
+function getDashboard_(tanggalInput, idTokoInput, bypassCache) {
   const tanggal = parseTanggal_(tanggalInput) || todayDate_();
   const idToko = String(idTokoInput || "").trim();
+  const tanggalKey = normalizeDate_(tanggal);
+  const tenant = getTenantContext_();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `EMS_DASHBOARD_V12_3_${tenant.id}_${tanggalKey}_${idToko || "ALL"}`;
+  if (!bypassCache) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (_) {}
+    }
+  }
 
   const tokoMap = {};
   getRows_(getSheet_(SHEET_TOKO), 6).forEach(row => {
@@ -1024,9 +1139,9 @@ function getDashboard_(tanggalInput, idTokoInput) {
 
   aktivitasTerbaru.sort((a, b) => b.waktuSort - a.waktuSort);
 
-  return {
+  const result = {
     success: true,
-    tanggal: normalizeDate_(tanggal),
+    tanggal: tanggalKey,
     summary: {
       totalKaryawan: karyawanAktif.length,
       hadir,
@@ -1054,8 +1169,9 @@ function getDashboard_(tanggalInput, idTokoInput) {
       status: row[9]
     }))
   };
+  cache.put(cacheKey, JSON.stringify(result), 20);
+  return result;
 }
-
 function getRiwayatAbsensi_(
   idKaryawan,
   bulanInput,
@@ -1301,8 +1417,10 @@ function simpanLog_(user, aktivitas, keterangan) {
 }
 
 function getSheet_(name) {
+  if (EMS_SHEET_CACHE[name]) return EMS_SHEET_CACHE[name];
   const sh = getTenantSpreadsheet_().getSheetByName(name);
   if (!sh) throw new Error(`Sheet "${name}" tidak ditemukan.`);
+  EMS_SHEET_CACHE[name] = sh;
   return sh;
 }
 
@@ -1442,6 +1560,13 @@ function formatFileTime_(date) {
 }
 
 function listToko_() {
+  const tenant = getTenantContext_();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `EMS_TOKO_V12_3_${tenant.id}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (_) {}
+  }
   const sh = getSheet_(SHEET_TOKO);
   const rows = getRows_(sh, 7);
   const items = rows
@@ -1456,7 +1581,14 @@ function listToko_() {
       radius: Number(row[5]) || 50,
       status: String(row[6] || "Aktif").trim()
     }));
-  return { success: true, items };
+  const result = { success: true, items };
+  cache.put(cacheKey, JSON.stringify(result), 300);
+  return result;
+}
+
+function invalidateStoreCache_() {
+  const tenant = getTenantContext_();
+  CacheService.getScriptCache().remove(`EMS_TOKO_V12_3_${tenant.id}`);
 }
 
 function listCabangAdmin_() {
@@ -1492,10 +1624,12 @@ function saveCabangAdmin_(data){
     const idx=rows.findIndex(r=>String(r[0]||"").trim()===original);
     if(idx<0)return{success:false,message:"Cabang tidak ditemukan."};
     sh.getRange(idx+2,1,1,7).setValues([[id,nama,alamat,latitude,longitude,radius,status]]);
+    invalidateStoreCache_();
     simpanLog_(data.adminUser||"Admin","Mengubah cabang",`${id} | ${nama} | ${status}`);
     return{success:true,message:"Cabang berhasil diperbarui.",item:{id,nama,status}};
   }
   sh.appendRow([id,nama,alamat,latitude,longitude,radius,status]);
+  invalidateStoreCache_();
   simpanLog_(data.adminUser||"Admin","Menambah cabang",`${id} | ${nama}`);
   return{success:true,message:"Cabang berhasil ditambahkan.",item:{id,nama,status}};
 }
@@ -1508,6 +1642,7 @@ function setStatusCabangAdmin_(data){
     if(active<=1)return{success:false,message:"Minimal satu cabang harus tetap aktif."};
   }
   sh.getRange(idx+2,7).setValue(status);
+  invalidateStoreCache_();
   simpanLog_(data.adminUser||"Admin","Mengubah status cabang",`${id} | ${status}`);
   return{success:true,message:`Cabang berhasil ${status==="Aktif"?"diaktifkan":"dinonaktifkan"}.`};
 }
@@ -1808,6 +1943,13 @@ function listKaryawanAdmin_(filter) {
 }
 
 function listShift_() {
+  const tenant = getTenantContext_();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `EMS_SHIFT_V12_5_${tenant.id}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (_) {}
+  }
   const rows = getRows_(getSheet_(SHEET_SHIFT), 4);
   const items = rows
     .filter(row => String(row[0] || "").trim())
@@ -1817,7 +1959,9 @@ function listShift_() {
       pulang: formatJam_(row[2]),
       telat: formatJam_(row[3])
     }));
-  return { success: true, items };
+  const result = { success: true, items };
+  cache.put(cacheKey, JSON.stringify(result), 600);
+  return result;
 }
 
 function saveKaryawan_(data) {
@@ -1978,6 +2122,7 @@ function getJadwalAdmin_(params) {
     success: true,
     periode: { tanggalMulai: startKey, tanggalAkhir: endKey },
     karyawan,
+    stores: listToko_().items,
     shifts: listShift_().items,
     items
   };
@@ -2254,7 +2399,7 @@ function kirimWhatsApp_(noHp,text,templateName,params){const p=getPengaturanMap_
 
 function normalizePhone_(value){let s=String(value||"").replace(/\D/g,""); if(s.startsWith("0"))s="62"+s.slice(1); return s;}
 function writePengaturanMap_(map){const sh=getSheet_(SHEET_PENGATURAN); const keys=Object.keys(map); if(sh.getLastRow()>1)sh.getRange(2,1,sh.getLastRow()-1,Math.max(2,sh.getLastColumn())).clearContent(); if(keys.length)sh.getRange(2,1,keys.length,2).setValues(keys.map(k=>[k,map[k]]));}
-function getOrCreateDataSheet_(name,headers){const ss=getTenantSpreadsheet_(); let sh=ss.getSheetByName(name); if(!sh){sh=ss.insertSheet(name); sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1);} return sh;}
+function getOrCreateDataSheet_(name,headers){if(EMS_SHEET_CACHE[name])return EMS_SHEET_CACHE[name];const ss=getTenantSpreadsheet_(); let sh=ss.getSheetByName(name); if(!sh){sh=ss.insertSheet(name); sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1);} EMS_SHEET_CACHE[name]=sh; return sh;}
 function formatDateTime_(v){if(!v)return"";const d=new Date(v);return isNaN(d)?String(v):Utilities.formatDate(d,Session.getScriptTimeZone(),"dd/MM/yyyy HH:mm");}
 function startOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate());}
 function endOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59,999);}
@@ -2389,14 +2534,29 @@ function getPortalJadwal_(token, tanggalMulai, tanggalAkhir) {
   if (!k) return portalAuthError_();
   const mulai = parseTanggal_(tanggalMulai) || todayDate_();
   const akhir = parseTanggal_(tanggalAkhir) || new Date(mulai.getFullYear(), mulai.getMonth(), mulai.getDate() + 13);
+  const startKey = normalizeDate_(mulai);
+  const endKey = normalizeDate_(akhir);
+
+  const jadwalMap = {};
+  getRows_(getSheet_(SHEET_JADWAL), 3).forEach(row => {
+    const tanggal = normalizeDate_(row[0]);
+    const id = String(row[1] || "").trim();
+    if (id === k.id && tanggal >= startKey && tanggal <= endKey) jadwalMap[tanggal] = String(row[2] || "").trim();
+  });
+  const shiftMap = {};
+  getRows_(getSheet_(SHEET_SHIFT), 4).forEach(row => {
+    const nama = String(row[0] || "").trim();
+    if (nama) shiftMap[nama.toLowerCase()] = { nama, masuk:formatJam_(row[1]), pulang:formatJam_(row[2]), telat:formatJam_(row[3]) };
+  });
+
   const items = [];
   for (let d = startOfDay_(mulai); d <= endOfDay_(akhir); d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
-    const result = getShiftKaryawan_(k.id, normalizeDate_(d));
-    items.push({ tanggal: normalizeDate_(d), shift: result.success ? result.shift : null });
+    const tanggal = normalizeDate_(d);
+    const namaShift = jadwalMap[tanggal] || k.shiftDefault;
+    items.push({ tanggal, shift:shiftMap[String(namaShift || "").toLowerCase()] || null });
   }
   return { success: true, items };
 }
-
 function getPortalRiwayat_(token, bulan, tahun) {
   const k = verifyPortalToken_(token);
   if (!k) return portalAuthError_();
@@ -2656,14 +2816,15 @@ function sendPayrollEmail_(data){
 // Migrasi ringan dan pemeriksaan struktur tanpa menghapus data lama.
 // ============================================================
 function ensureSystemSchema_() {
-  ensureTenantRegistry_();
   const cache = CacheService.getScriptCache();
-  if (cache.get("EMS_SCHEMA_V12_2_OK") === "1") return;
+  const tenant = getTenantContext_();
+  const schemaCacheKey = `EMS_SCHEMA_V12_3_OK_${tenant.id}`;
+  if (cache.get(schemaCacheKey) === "1") return;
 
   const lock = LockService.getScriptLock();
   try {
     lock.tryLock(5000);
-    if (cache.get("EMS_SCHEMA_V12_2_OK") === "1") return;
+    if (cache.get(schemaCacheKey) === "1") return;
 
     ensureSheetHeader_(SHEET_TOKO, ["ID Toko","Nama Toko","Alamat","Latitude","Longitude","Radius","Status"]);
     ensureKaryawanEmailColumn_();
@@ -2674,7 +2835,7 @@ function ensureSystemSchema_() {
     ensureSheetHeader_(SHEET_ADMIN, ["Username","Password Hash","Salt","Nama","Role","Status","Version","Dibuat Pada","Login Terakhir"]);
     migrateLegacyAdmin_();
 
-    cache.put("EMS_SCHEMA_V12_2_OK", "1", 300);
+    cache.put(schemaCacheKey, "1", 1800);
   } catch (error) {
     console.error("Migrasi schema V9.1 dilewati:", error);
   } finally {
@@ -2730,7 +2891,7 @@ function getSystemHealth_() {
 
   return {
     success: true,
-    version: "11.0",
+    version: "12.5-web-fast",
     timezone: Session.getScriptTimeZone(),
     adminConfigured: getAdminSetupStatus_().configured,
     emailQuota,
@@ -2943,6 +3104,8 @@ function savePlatformTenant_(data){
     if(existingIndex>=0){
       const r=rows[existingIndex];
       sh.getRange(existingIndex+2,2,1,10).setValues([[code,name,r[3],r[4],pkg,status,start,end,maxStores,maxEmployees]]);
+      clearTenantCache_({id:String(r[0]||""),code:String(r[1]||"")});
+      clearTenantCache_({id:String(r[0]||""),code});
       platformAudit_(auth.admin,"Memperbarui pelanggan",code,name,"Paket "+pkg+", status "+status);
       return{success:true,message:"Data pelanggan berhasil diperbarui."};
     }
@@ -2988,7 +3151,7 @@ function setPlatformTenantStatus_(data){
   const auth=requirePlatform_(data.platformToken);if(!auth.success)return auth;const code=normalizeTenantKey_(data.code),status=String(data.status||"")==="Aktif"?"Aktif":"Nonaktif";
   if(code===DEFAULT_TENANT_CODE&&status==="Nonaktif")return{success:false,message:"Pelanggan DEFAULT tidak dapat dinonaktifkan dari panel."};
   const sh=ensureTenantRegistry_(),rows=platformTenantRows_(),i=rows.findIndex(r=>normalizeTenantKey_(r[1])===code);if(i<0)return{success:false,message:"Pelanggan tidak ditemukan."};
-  sh.getRange(i+2,7).setValue(status);platformAudit_(auth.admin,status==="Aktif"?"Mengaktifkan pelanggan":"Menonaktifkan pelanggan",code,String(rows[i][2]||""),"");return{success:true,message:"Status pelanggan berhasil diperbarui."};
+  sh.getRange(i+2,7).setValue(status);clearTenantCache_({id:String(rows[i][0]||""),code:String(rows[i][1]||"")});platformAudit_(auth.admin,status==="Aktif"?"Mengaktifkan pelanggan":"Menonaktifkan pelanggan",code,String(rows[i][2]||""),"");return{success:true,message:"Status pelanggan berhasil diperbarui."};
 }
 
 
