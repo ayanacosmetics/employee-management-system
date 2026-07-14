@@ -9,10 +9,17 @@
 
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/face_mesh.js"></script>
   <script src="js/config.js"></script>
 <style>
     .entry-gate{display:none;background:#fff;border:1px solid #e5e7eb;border-radius:24px;padding:26px;box-shadow:0 18px 50px rgba(15,23,42,.08);margin-top:18px}
     .entry-gate.active{display:block}.entry-hero{display:flex;gap:16px;align-items:center;margin-bottom:20px}.entry-avatar{width:58px;height:58px;border-radius:18px;background:#ede9fe;color:#5b21b6;display:grid;place-items:center}.entry-avatar svg{width:28px;height:28px}.entry-hero h2{margin:0 0 5px}.entry-hero p{margin:0;color:#64748b}.entry-actions{display:grid;grid-template-columns:1fr 1fr;gap:14px}.entry-action{border:1px solid #e2e8f0;background:#fff;border-radius:18px;padding:20px;text-align:left;cursor:pointer;transition:.18s}.entry-action:hover{border-color:#7c3aed;transform:translateY(-1px);box-shadow:0 12px 28px rgba(124,58,237,.1)}.entry-action svg{width:25px;height:25px;color:#6d28d9}.entry-action b{display:block;font-size:17px;margin:12px 0 5px}.entry-action small{color:#64748b;line-height:1.5}.entry-status{margin-top:18px;padding:14px 16px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0;display:none}.entry-status.show{display:block}.entry-status b{display:block;margin-bottom:4px}.session-confirm{display:none;padding:16px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:16px;margin:16px 0}.session-confirm.show{display:block}.attendance-hidden{display:none!important}@media(max-width:650px){.entry-actions{grid-template-columns:1fr}.entry-gate{padding:20px}.entry-action{padding:17px}}
+    #cameraVideo{transform:scaleX(-1)}
+    #selfiePreview{object-position:center center}
+    .liveness-overlay{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:18px;background:linear-gradient(180deg,rgba(15,23,42,.18),transparent 36%,transparent 62%,rgba(15,23,42,.62));z-index:3}
+    .liveness-overlay.captured{display:none}.liveness-face-guide{width:62%;height:67%;margin-top:5%;border:3px solid rgba(255,255,255,.78);border-radius:48% 48% 44% 44%;box-shadow:0 0 0 999px rgba(15,23,42,.08),0 0 24px rgba(255,255,255,.16);transition:border-color .2s,box-shadow .2s}.liveness-overlay.detected .liveness-face-guide{border-color:#60a5fa}.liveness-overlay.verified .liveness-face-guide{border-color:#4ade80;box-shadow:0 0 0 999px rgba(15,23,42,.05),0 0 28px rgba(74,222,128,.25)}
+    .liveness-status-card{width:100%;display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid rgba(255,255,255,.25);border-radius:14px;background:rgba(15,23,42,.78);color:#fff;backdrop-filter:blur(8px);text-align:left}.liveness-status-card b,.liveness-status-card small{display:block}.liveness-status-card b{font-size:14px}.liveness-status-card small{font-size:12px;color:rgba(255,255,255,.74);margin-top:2px}.liveness-dot{width:10px;height:10px;border-radius:50%;background:#f59e0b;box-shadow:0 0 0 5px rgba(245,158,11,.16);flex:none}.liveness-overlay.detected .liveness-dot{background:#60a5fa;box-shadow:0 0 0 5px rgba(96,165,250,.16)}.liveness-overlay.verified .liveness-dot{background:#4ade80;box-shadow:0 0 0 5px rgba(74,222,128,.16)}.liveness-progress{position:absolute;left:18px;right:18px;bottom:12px;height:4px;border-radius:99px;overflow:hidden;background:rgba(255,255,255,.18)}.liveness-progress span{display:block;width:0;height:100%;background:#60a5fa;transition:width .18s}.liveness-overlay.verified .liveness-progress span{background:#4ade80}
+    @media(max-width:650px){.liveness-overlay{padding:14px}.liveness-progress{left:14px;right:14px}}
   </style></head>
 
 <body class="attendance-page">
@@ -122,7 +129,7 @@
         <h2>Ambil Selfie</h2>
 
         <p>
-          Pastikan wajah terlihat jelas dan kamera menghadap ke depan.
+          Posisikan satu wajah di dalam bingkai, tatap kamera, lalu tersenyum untuk verifikasi liveness.
         </p>
 
         <div class="camera-frame">
@@ -138,6 +145,15 @@
           <img
             id="selfiePreview"
             alt="Preview selfie">
+
+          <div id="livenessOverlay" class="liveness-overlay" aria-live="polite">
+            <div class="liveness-face-guide" aria-hidden="true"></div>
+            <div class="liveness-status-card">
+              <span id="livenessDot" class="liveness-dot"></span>
+              <div><b id="livenessStatus">Buka kamera untuk mulai</b><small id="livenessHint">Wajah harus terlihat jelas</small></div>
+            </div>
+            <div class="liveness-progress"><span id="livenessProgress"></span></div>
+          </div>
         </div>
 
         <div class="camera-actions">
@@ -322,6 +338,15 @@
     let currentPin = "";
     let selfieData = "";
     let cameraStream = null;
+    let faceMesh = null;
+    let livenessRunning = false;
+    let livenessBusy = false;
+    let livenessVerified = false;
+    let livenessVerifiedAt = 0;
+    let livenessStableFrames = 0;
+    let livenessSmileFrames = 0;
+    let livenessBaseline = 0;
+    let livenessBaselineSamples = [];
 
     let currentLatitude = null;
     let currentLongitude = null;
@@ -681,164 +706,197 @@
         );
     }
 
-    async function startCamera() {
-        try {
-        cameraStream =
-            await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: "user",
-                width: {
-                ideal: 720
-                },
-                height: {
-                ideal: 960
-                }
-            },
-            audio: false
-            });
-
-        const video =
-            document.getElementById(
-            "cameraVideo"
-            );
-
-        video.srcObject = cameraStream;
-
-        document.getElementById(
-          "cameraButton"
-        ).style.display = "none";
-
-        document.getElementById(
-          "captureButton"
-        ).style.display = "inline-flex";
-
-        document.getElementById(
-          "captureButton"
-        ).disabled = false;
-
-        } catch (error) {
-        Swal.fire({
-            icon: "error",
-            title: "Kamera gagal dibuka",
-            text: error.message
-        });
-        }
+    function setLivenessStatus(status, hint, progress = 0, state = "") {
+      const overlay = document.getElementById("livenessOverlay");
+      overlay.classList.remove("detected", "verified", "captured");
+      if (state) overlay.classList.add(state);
+      document.getElementById("livenessStatus").innerText = status;
+      document.getElementById("livenessHint").innerText = hint;
+      document.getElementById("livenessProgress").style.width = `${Math.max(0, Math.min(100, progress))}%`;
     }
 
-    function captureSelfie() {
-      const video =
-        document.getElementById("cameraVideo");
+    function resetLiveness() {
+      livenessVerified = false;
+      livenessVerifiedAt = 0;
+      livenessStableFrames = 0;
+      livenessSmileFrames = 0;
+      livenessBaseline = 0;
+      livenessBaselineSamples = [];
+      document.getElementById("captureButton").disabled = true;
+      setLivenessStatus("Mencari wajah...", "Posisikan satu wajah di dalam bingkai", 0);
+    }
 
-      const canvas =
-        document.getElementById("cameraCanvas");
+    function landmarkDistance(a, b) {
+      return Math.hypot((a.x || 0) - (b.x || 0), (a.y || 0) - (b.y || 0));
+    }
 
-      const preview =
-        document.getElementById("selfiePreview");
-
-      if (!video.videoWidth || !video.videoHeight) {
-        Swal.fire({
-          icon: "warning",
-          title: "Kamera belum siap",
-          text: "Tunggu beberapa detik lalu coba lagi."
-        });
-
+    function handleFaceResults(results) {
+      if (!livenessRunning || livenessVerified) return;
+      const faces = results.multiFaceLandmarks || [];
+      if (faces.length !== 1) {
+        livenessStableFrames = 0;
+        livenessSmileFrames = 0;
+        setLivenessStatus(faces.length > 1 ? "Terdeteksi lebih dari satu wajah" : "Wajah belum terdeteksi", faces.length > 1 ? "Pastikan hanya satu orang di depan kamera" : "Hadapkan wajah ke kamera", 0);
         return;
       }
 
-      canvas.width = 720;
-      canvas.height = 960;
+      const lm = faces[0];
+      const faceWidth = landmarkDistance(lm[234], lm[454]);
+      const centerX = (lm[1].x + lm[152].x) / 2;
+      const centerY = (lm[10].y + lm[152].y) / 2;
+      const wellPositioned = faceWidth > 0.23 && faceWidth < 0.78 && centerX > 0.27 && centerX < 0.73 && centerY > 0.28 && centerY < 0.72;
+      if (!wellPositioned) {
+        livenessStableFrames = 0;
+        livenessSmileFrames = 0;
+        setLivenessStatus("Atur posisi wajah", faceWidth <= 0.23 ? "Dekatkan wajah ke kamera" : faceWidth >= 0.78 ? "Jauhkan sedikit wajah" : "Letakkan wajah di tengah bingkai", 8, "detected");
+        return;
+      }
 
-      const context =
-        canvas.getContext("2d");
+      const mouthWidth = landmarkDistance(lm[61], lm[291]);
+      const mouthRatio = faceWidth ? mouthWidth / faceWidth : 0;
+      const mouthCenterY = (lm[13].y + lm[14].y) / 2;
+      const cornerY = (lm[61].y + lm[291].y) / 2;
+      const cornerLift = mouthCenterY - cornerY;
 
-      context.drawImage(
-        video,
-        0,
-        0,
-        canvas.width,
-        canvas.height
-      );
+      if (livenessStableFrames < 8) {
+        livenessStableFrames += 1;
+        livenessBaselineSamples.push(mouthRatio);
+        const progress = Math.round((livenessStableFrames / 8) * 42);
+        setLivenessStatus("Wajah terdeteksi", "Tatap kamera dengan ekspresi netral", progress, "detected");
+        if (livenessStableFrames === 8) {
+          livenessBaseline = livenessBaselineSamples.reduce((sum, value) => sum + value, 0) / livenessBaselineSamples.length;
+        }
+        return;
+      }
 
-      selfieData =
-        canvas.toDataURL(
-          "image/jpeg",
-          0.72
-        );
+      const smiling = mouthRatio > Math.max(livenessBaseline * 1.045, livenessBaseline + 0.008) && cornerLift > 0.001;
+      if (smiling) livenessSmileFrames += 1;
+      else livenessSmileFrames = Math.max(0, livenessSmileFrames - 1);
+      const progress = 42 + Math.round((livenessSmileFrames / 5) * 58);
+      setLivenessStatus(smiling ? "Senyum terdeteksi" : "Sekarang tersenyum", smiling ? "Tahan senyum sebentar" : "Tunjukkan senyum alami ke kamera", progress, "detected");
 
-      // Tampilkan hasil selfie
+      if (livenessSmileFrames >= 5) {
+        livenessVerified = true;
+        livenessVerifiedAt = Date.now();
+        livenessRunning = false;
+        document.getElementById("captureButton").disabled = false;
+        setLivenessStatus("Liveness terverifikasi", "Silakan ambil selfie", 100, "verified");
+      }
+    }
+
+    async function ensureFaceMesh() {
+      if (faceMesh) return faceMesh;
+      if (typeof FaceMesh === "undefined") throw new Error("Modul deteksi wajah belum berhasil dimuat. Periksa koneksi internet lalu coba lagi.");
+      faceMesh = new FaceMesh({
+        locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/${file}`
+      });
+      faceMesh.setOptions({
+        maxNumFaces: 2,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.68,
+        minTrackingConfidence: 0.68
+      });
+      faceMesh.onResults(handleFaceResults);
+      return faceMesh;
+    }
+
+    async function runLivenessLoop() {
+      const video = document.getElementById("cameraVideo");
+      while (livenessRunning && cameraStream) {
+        if (!livenessBusy && video.readyState >= 2) {
+          livenessBusy = true;
+          try { await faceMesh.send({ image: video }); }
+          catch (error) {
+            console.error("Liveness:", error);
+            setLivenessStatus("Deteksi wajah terganggu", "Pastikan koneksi stabil lalu buka kamera ulang", 0);
+          } finally { livenessBusy = false; }
+        }
+        await new Promise(resolve => setTimeout(resolve, 130));
+      }
+    }
+
+    function stopCameraStream() {
+      livenessRunning = false;
+      if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+    }
+
+    async function startCamera() {
+      try {
+        stopCameraStream();
+        resetLiveness();
+        document.getElementById("livenessOverlay").classList.remove("captured");
+        const video = document.getElementById("cameraVideo");
+        video.style.display = "block";
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode:"user", width:{ideal:720}, height:{ideal:960}, aspectRatio:{ideal:0.75} },
+          audio: false
+        });
+        video.srcObject = cameraStream;
+        await video.play();
+        document.getElementById("cameraButton").style.display = "none";
+        document.getElementById("captureButton").style.display = "inline-flex";
+        document.getElementById("captureButton").disabled = true;
+        setLivenessStatus("Menyiapkan deteksi wajah...", "Tetap berada di depan kamera", 4);
+        await ensureFaceMesh();
+        livenessRunning = true;
+        runLivenessLoop();
+      } catch (error) {
+        stopCameraStream();
+        setLivenessStatus("Kamera atau deteksi gagal", error.message, 0);
+        Swal.fire({ icon:"error", title:"Kamera gagal dibuka", text:error.message });
+      }
+    }
+
+    function captureSelfie() {
+      const video = document.getElementById("cameraVideo");
+      const canvas = document.getElementById("cameraCanvas");
+      const preview = document.getElementById("selfiePreview");
+      if (!livenessVerified || Date.now() - livenessVerifiedAt > 20000) {
+        resetLiveness();
+        livenessRunning = true;
+        runLivenessLoop();
+        Swal.fire({ icon:"warning", title:"Verifikasi wajah diperlukan", text:"Tatap kamera lalu tersenyum sampai liveness terverifikasi." });
+        return;
+      }
+      if (!video.videoWidth || !video.videoHeight) {
+        Swal.fire({ icon:"warning", title:"Kamera belum siap", text:"Tunggu beberapa detik lalu coba lagi." });
+        return;
+      }
+
+      // Center-crop ke rasio 3:4 agar foto tidak meregang/memanjang.
+      const targetWidth = 720, targetHeight = 960, targetRatio = targetWidth / targetHeight;
+      const sourceWidth = video.videoWidth, sourceHeight = video.videoHeight, sourceRatio = sourceWidth / sourceHeight;
+      let sx = 0, sy = 0, cropWidth = sourceWidth, cropHeight = sourceHeight;
+      if (sourceRatio > targetRatio) {
+        cropWidth = sourceHeight * targetRatio;
+        sx = (sourceWidth - cropWidth) / 2;
+      } else {
+        cropHeight = sourceWidth / targetRatio;
+        sy = (sourceHeight - cropHeight) / 2;
+      }
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const context = canvas.getContext("2d");
+      // Simpan selfie mirror agar hasil sama dengan preview kamera depan.
+      context.save();
+      context.translate(targetWidth, 0);
+      context.scale(-1, 1);
+      context.drawImage(video, sx, sy, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight);
+      context.restore();
+      selfieData = canvas.toDataURL("image/jpeg", 0.78);
+
       preview.src = selfieData;
       preview.style.display = "block";
       video.style.display = "none";
-
-      // Atur tombol setelah selfie diambil
-      document.getElementById(
-        "cameraButton"
-      ).style.display = "none";
-
-      document.getElementById(
-        "captureButton"
-      ).style.display = "none";
-
-      document.getElementById(
-        "retakeButton"
-      ).style.display = "inline-flex";
-
-      document.getElementById(
-        "continuePinButton"
-      ).style.display = "inline-flex";
-
-      if (cameraStream) {
-        cameraStream
-          .getTracks()
-          .forEach(track => track.stop());
-
-        cameraStream = null;
-      }
-
+      document.getElementById("livenessOverlay").classList.add("captured");
+      document.getElementById("cameraButton").style.display = "none";
+      document.getElementById("captureButton").style.display = "none";
+      document.getElementById("retakeButton").style.display = "inline-flex";
+      document.getElementById("continuePinButton").style.display = "inline-flex";
+      stopCameraStream();
       updateSubmitButton();
       lucide.createIcons();
-    }
-
-    function inputPin(number) {
-        if (currentPin.length >= 4) return;
-
-        currentPin += number;
-        updatePinDisplay();
-    }
-
-    function deletePin() {
-        currentPin =
-        currentPin.slice(0, -1);
-
-        updatePinDisplay();
-    }
-
-    function clearPin() {
-        currentPin = "";
-        updatePinDisplay();
-    }
-
-    function updatePinDisplay() {
-      const dots = document.querySelectorAll("#pinDisplay span");
-      dots.forEach((dot, index) => {
-        dot.classList.toggle("filled", index < currentPin.length);
-      });
-      updateSubmitButton();
-      if (currentPin.length === 4) {
-        loadEmployeeAndShift();
-      } else {
-        resetShiftInfo();
-      }
-    }
-
-    function resetShiftInfo() {
-      shiftRequestToken++;
-      currentEmployee = null;
-      currentShift = null;
-      document.getElementById("shiftName").innerText = "Menunggu PIN";
-      document.getElementById("shiftStart").innerText = "-";
-      document.getElementById("shiftEnd").innerText = "-";
-      document.getElementById("shiftStatus").innerText = "Masukkan PIN";
     }
 
     async function loadEmployeeAndShift() {
@@ -937,7 +995,7 @@
             currentAccuracy <= 100;
 
         const selfieSiap =
-            Boolean(selfieData);
+            Boolean(selfieData && livenessVerified);
 
         const sessionSiap = Boolean(currentPortalSession?.token && portalHomeData);
         const pinSiap = sessionSiap || currentPin.length === 4;
@@ -950,6 +1008,8 @@
 
         async function retakeSelfie() {
       selfieData = "";
+      resetLiveness();
+      document.getElementById("livenessOverlay").classList.remove("captured");
 
       document.getElementById(
         "selfiePreview"
@@ -1058,6 +1118,8 @@
           longitude: currentLongitude,
           accuracy: currentAccuracy,
           selfieBase64: selfieData,
+          livenessPassed: livenessVerified,
+          livenessMethod: "face-smile-v1",
           device: navigator.userAgent
         };
 
@@ -1160,6 +1222,9 @@
     function resetAttendance() {
         currentPin = "";
         selfieData = "";
+        stopCameraStream();
+        resetLiveness();
+        document.getElementById("livenessOverlay").classList.remove("captured");
 
         currentLatitude = null;
         currentLongitude = null;

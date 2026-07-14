@@ -636,7 +636,7 @@ function getPinAttendanceContext_(pin, idTokoInput, tanggalInput) {
   if (idToko && String(karyawan.idToko || "").trim() !== idToko) {
     return {success:false,message:"Tidak terdaftar di toko ini.",storeMismatch:true};
   }
-  const shiftResult = getShiftForEmployeeFast_(karyawan, tanggalKey);
+  const shiftResult = getShiftKaryawan_(karyawan.id, tanggalKey);
   if (!shiftResult.success) return shiftResult;
 
   const result = {success:true,karyawan,shift:shiftResult.shift,tanggal:tanggalKey};
@@ -731,6 +731,7 @@ function prosesAbsensi_(data) {
   const selfieBase64 = String(
     data.selfieBase64 || ""
   ).trim();
+  const livenessPassed = data.livenessPassed === true;
 
   if ((!pin && !portalToken) || !idToko) {
     return {
@@ -763,6 +764,12 @@ function prosesAbsensi_(data) {
     return {
       success: false,
       message: "Selfie wajib diambil."
+    };
+  }
+  if (!livenessPassed) {
+    return {
+      success: false,
+      message: "Verifikasi wajah dan senyum belum berhasil. Ulangi selfie."
     };
   }
 
@@ -2891,7 +2898,7 @@ function getSystemHealth_() {
 
   return {
     success: true,
-    version: "12.5-web-fast",
+    version: "12.6-face-liveness",
     timezone: Session.getScriptTimeZone(),
     adminConfigured: getAdminSetupStatus_().configured,
     emailQuota,
