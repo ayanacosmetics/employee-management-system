@@ -11,7 +11,7 @@
   const originalFetch=window.fetch.bind(window);
   window.fetch=async(input,init={})=>{
     let url=typeof input==="string"?input:(input instanceof URL?input.toString():input?.url||"");
-    let nextInput=input; const nextInit={...init}; const api=String(window.EMS_API_URL||"");
+    let nextInput=input; const nextInit={...init}; const api=String((typeof EMS_API_URL!=="undefined"?EMS_API_URL:window.EMS_API_URL)||"");
     if(api&&url.startsWith(api)){
       const method=String(nextInit.method||"GET").toUpperCase();
       if(method==="GET"){const u=new URL(url);u.searchParams.set("platformToken",token);nextInput=u.toString()}
