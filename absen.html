@@ -339,6 +339,7 @@
         window.location.search
     );
 
+    const tenantCode = String(params.get("pelanggan") || params.get("tenantCode") || "DEFAULT").trim().toUpperCase();
     const tokoId =
         params.get("toko") ||
         DEFAULT_TOKO_ID;
@@ -415,7 +416,7 @@
       if (currentPortalSession?.token && portalHomeData) {
         window.location.href = "portal.html";
       } else {
-        window.location.href = `portal-login.html?toko=${encodeURIComponent(tokoId)}`;
+        window.location.href = `portal-login.html?pelanggan=${encodeURIComponent(tenantCode)}&toko=${encodeURIComponent(tokoId)}`;
       }
     }
 
@@ -475,7 +476,7 @@
     async function loadToko() {
         try {
         const url =
-            `${EMS_API_URL}?action=getToko&id=${encodeURIComponent(tokoId)}`;
+            `${EMS_API_URL}?action=getToko&tenantCode=${encodeURIComponent(tenantCode)}&id=${encodeURIComponent(tokoId)}`;
 
         const res = await fetch(url);
         const data = await res.json();
@@ -839,7 +840,7 @@
       document.getElementById("shiftName").innerText = "Memeriksa...";
       document.getElementById("shiftStatus").innerText = "Memuat data";
       try {
-        const employeeResponse = await fetch(`${EMS_API_URL}?action=getKaryawanByPin&pin=${encodeURIComponent(currentPin)}`);
+        const employeeResponse = await fetch(`${EMS_API_URL}?action=getKaryawanByPin&tenantCode=${encodeURIComponent(tenantCode)}&pin=${encodeURIComponent(currentPin)}`);
         const employeeData = await employeeResponse.json();
         if (token !== shiftRequestToken) return;
         if (!employeeData.success) {
@@ -861,7 +862,7 @@
           document.getElementById("shiftStatus").innerText = "Tidak terdaftar di toko ini";
           return;
         }
-        const shiftResponse = await fetch(`${EMS_API_URL}?action=getShiftKaryawan&idKaryawan=${encodeURIComponent(currentEmployee.id)}`);
+        const shiftResponse = await fetch(`${EMS_API_URL}?action=getShiftKaryawan&tenantCode=${encodeURIComponent(tenantCode)}&idKaryawan=${encodeURIComponent(currentEmployee.id)}`);
         const shiftData = await shiftResponse.json();
         if (token !== shiftRequestToken) return;
         if (!shiftData.success) throw new Error(shiftData.message || "Shift tidak ditemukan.");
@@ -1099,7 +1100,7 @@
           const portalResponse = await fetch(EMS_API_URL, {
             method: "POST",
             headers: { "Content-Type": "text/plain;charset=utf-8" },
-            body: JSON.stringify({ action: "loginPortal", pin: currentPin, idToko: tokoId })
+            body: JSON.stringify({ action: "loginPortal", tenantCode, pin: currentPin, idToko: tokoId })
           });
           const portalData = await portalResponse.json();
           if (portalData.success && portalData.token) {

@@ -9,14 +9,103 @@ const SHEET_PENGATURAN = "Pengaturan";
 const SHEET_PENGUMUMAN = "Pengumuman";
 const SHEET_PAYROLL = "Payroll";
 const SHEET_ADMIN = "Admin";
+const SHEET_PELANGGAN = "Pelanggan";
+const DEFAULT_TENANT_ID = "PLG001";
+const DEFAULT_TENANT_CODE = "DEFAULT";
+let EMS_TENANT_CONTEXT = null;
+
+function getMasterSpreadsheet_() {
+  const props = PropertiesService.getScriptProperties();
+  let id = String(props.getProperty("EMS_MASTER_SPREADSHEET_ID") || "").trim();
+  if (!id) {
+    const active = SpreadsheetApp.getActive();
+    id = active.getId();
+    props.setProperty("EMS_MASTER_SPREADSHEET_ID", id);
+  }
+  return SpreadsheetApp.openById(id);
+}
+function ensureMasterSheetHeader_(name, headers) {
+  const ss = getMasterSpreadsheet_();
+  let sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  if (sh.getMaxColumns() < headers.length) sh.insertColumnsAfter(sh.getMaxColumns(), headers.length - sh.getMaxColumns());
+  const current = sh.getRange(1,1,1,headers.length).getDisplayValues()[0];
+  const out = current.slice(); let changed = false;
+  headers.forEach((h,i)=>{ if(!String(out[i]||"").trim()){out[i]=h;changed=true;} });
+  if (changed) sh.getRange(1,1,1,headers.length).setValues([out]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+function ensureTenantRegistry_() {
+  const sh = ensureMasterSheetHeader_(SHEET_PELANGGAN, [
+    "ID Pelanggan","Kode Pelanggan","Nama Pelanggan","Spreadsheet ID","Folder Drive ID",
+    "Paket","Status","Tanggal Mulai","Tanggal Berakhir","Maksimal Toko","Maksimal Karyawan","Dibuat Pada"
+  ]);
+  const rows = sh.getLastRow() < 2 ? [] : sh.getRange(2,1,sh.getLastRow()-1,12).getValues();
+  if (!rows.some(r => String(r[0]||"").trim() === DEFAULT_TENANT_ID)) {
+    const master = getMasterSpreadsheet_();
+    sh.appendRow([DEFAULT_TENANT_ID,DEFAULT_TENANT_CODE,master.getName(),master.getId(),"","LEGACY","Aktif",new Date(),"",999,9999,new Date()]);
+  }
+  return sh;
+}
+function normalizeTenantKey_(value){ return String(value||"").trim().toUpperCase(); }
+function resolveTenant_(key) {
+  const sh = ensureTenantRegistry_();
+  const search = normalizeTenantKey_(key || DEFAULT_TENANT_CODE);
+  const rows = sh.getLastRow() < 2 ? [] : sh.getRange(2,1,sh.getLastRow()-1,12).getValues();
+  const row = rows.find(r => normalizeTenantKey_(r[0])===search || normalizeTenantKey_(r[1])===search);
+  if (!row) return null;
+  return {
+    id:String(row[0]||"").trim(), code:String(row[1]||"").trim().toUpperCase(),
+    name:String(row[2]||"").trim(), spreadsheetId:String(row[3]||"").trim(),
+    folderId:String(row[4]||"").trim(), package:String(row[5]||"").trim(),
+    status:String(row[6]||"Aktif").trim(), maxStores:Number(row[9])||0, maxEmployees:Number(row[10])||0
+  };
+}
+function setTenantContext_(key) {
+  const tenant = resolveTenant_(key || DEFAULT_TENANT_CODE);
+  if (!tenant) throw new Error("Pelanggan tidak ditemukan.");
+  if (tenant.status.toLowerCase() !== "aktif") throw new Error("Akun pelanggan sedang nonaktif.");
+  EMS_TENANT_CONTEXT = tenant;
+  return tenant;
+}
+function getTenantContext_(){ return EMS_TENANT_CONTEXT || setTenantContext_(DEFAULT_TENANT_CODE); }
+function getTenantSpreadsheet_(){
+  const tenant = getTenantContext_();
+  if (!tenant.spreadsheetId) throw new Error("Spreadsheet pelanggan belum dikonfigurasi.");
+  return SpreadsheetApp.openById(tenant.spreadsheetId);
+}
+function tenantFromSignedToken_(token) {
+  try {
+    const body = String(token||"").split(".")[0];
+    if (!body) return "";
+    const payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(body)).getDataAsString());
+    return String(payload.tenantId || payload.tenantCode || "");
+  } catch (_) { return ""; }
+}
+function initializeTenantForGet_(e) {
+  const p = (e && e.parameter) || {};
+  return setTenantContext_(tenantFromSignedToken_(p.adminToken || p.token || p.portalToken) || p.tenantCode || p.pelanggan || DEFAULT_TENANT_CODE);
+}
+function initializeTenantForPost_(data) {
+  return setTenantContext_(tenantFromSignedToken_(data.adminToken || data.token || data.portalToken) || data.tenantCode || data.pelanggan || DEFAULT_TENANT_CODE);
+}
+function getTenantInfo_() {
+  const t=getTenantContext_();
+  return {success:true,tenant:{id:t.id,code:t.code,name:t.name,package:t.package,status:t.status,maxStores:t.maxStores,maxEmployees:t.maxEmployees}};
+}
+
 
 function doGet(e) {
+  try { initializeTenantForGet_(e); } catch (error) { return json({success:false,message:error.message}); }
   ensureSystemSchema_();
   const action = String((e && e.parameter && e.parameter.action) || "").trim();
 
   if (action === "getAdminSetupStatus") {
-    return json(getAdminSetupStatus_());
+    return json(Object.assign(getAdminSetupStatus_(), {tenant:getTenantInfo_().tenant}));
   }
+
+  if (action === "getTenantInfo") return json(getTenantInfo_());
 
   if (action === "validateAdminSession") {
     return json(validateAdminSession_(e.parameter.adminToken));
@@ -199,6 +288,7 @@ function doPost(e) {
   }
 
   const action = String(data.action || "").trim();
+  try { initializeTenantForPost_(data); } catch (error) { return json({success:false,message:error.message}); }
 
   if (action === "setupAdmin") {
     return json(setupAdmin_(data));
@@ -1137,16 +1227,8 @@ function simpanLog_(user, aktivitas, keterangan) {
 }
 
 function getSheet_(name) {
-  const sh = SpreadsheetApp
-    .getActive()
-    .getSheetByName(name);
-
-  if (!sh) {
-    throw new Error(
-      `Sheet "${name}" tidak ditemukan.`
-    );
-  }
-
+  const sh = getTenantSpreadsheet_().getSheetByName(name);
+  if (!sh) throw new Error(`Sheet "${name}" tidak ditemukan.`);
   return sh;
 }
 
@@ -2048,7 +2130,7 @@ function kirimWhatsApp_(noHp,text,templateName,params){const p=getPengaturanMap_
 
 function normalizePhone_(value){let s=String(value||"").replace(/\D/g,""); if(s.startsWith("0"))s="62"+s.slice(1); return s;}
 function writePengaturanMap_(map){const sh=getSheet_(SHEET_PENGATURAN); const keys=Object.keys(map); if(sh.getLastRow()>1)sh.getRange(2,1,sh.getLastRow()-1,Math.max(2,sh.getLastColumn())).clearContent(); if(keys.length)sh.getRange(2,1,keys.length,2).setValues(keys.map(k=>[k,map[k]]));}
-function getOrCreateDataSheet_(name,headers){const ss=SpreadsheetApp.getActive(); let sh=ss.getSheetByName(name); if(!sh){sh=ss.insertSheet(name); sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1);} return sh;}
+function getOrCreateDataSheet_(name,headers){const ss=getTenantSpreadsheet_(); let sh=ss.getSheetByName(name); if(!sh){sh=ss.insertSheet(name); sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1);} return sh;}
 function formatDateTime_(v){if(!v)return"";const d=new Date(v);return isNaN(d)?String(v):Utilities.formatDate(d,Session.getScriptTimeZone(),"dd/MM/yyyy HH:mm");}
 function startOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate());}
 function endOfDay_(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59,999);}
@@ -2087,8 +2169,11 @@ function portalPinVersion_(karyawan) {
 function makePortalToken_(idKaryawan) {
   const karyawan = getKaryawanById_(idKaryawan);
   if (!karyawan) throw new Error("Karyawan tidak ditemukan.");
+  const tenant = getTenantContext_();
   const payload = {
     id: String(idKaryawan || "").trim(),
+    tenantId: tenant.id,
+    tenantCode: tenant.code,
     pv: portalPinVersion_(karyawan),
     issuedAt: Date.now(),
     nonce: Utilities.getUuid()
@@ -2111,7 +2196,8 @@ function verifyPortalToken_(token) {
     const decoded = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString();
     const payload = JSON.parse(decoded);
     if (!payload.id) return null;
-    // Token V7–V10 tetap didukung sampai waktu kedaluwarsanya.
+    setTenantContext_(payload.tenantId || payload.tenantCode || DEFAULT_TENANT_CODE);
+    // Token lama tetap didukung pada pelanggan DEFAULT.
     if (payload.exp && Number(payload.exp) < Date.now()) return null;
     const karyawan = getKaryawanById_(payload.id);
     if (!karyawan || String(karyawan.status || "").toLowerCase() !== "aktif") return null;
@@ -2142,6 +2228,7 @@ function loginPortal_(data) {
     token: makePortalToken_(k.id),
     persistent: true,
     expiresInHours: 0,
+    tenant: getTenantInfo_().tenant,
     karyawan: sanitizePortalEmployee_(k)
   };
 }
@@ -2336,7 +2423,7 @@ function setupAdmin_(data){
   return loginAdmin_({username,password});
 }
 function makeAdminToken_(admin){
-  const payload={username:admin.username,role:admin.role,version:admin.version,iat:Date.now()};
+  const tenant=getTenantContext_(); const payload={username:admin.username,role:admin.role,version:admin.version,tenantId:tenant.id,tenantCode:tenant.code,iat:Date.now()};
   const body=Utilities.base64EncodeWebSafe(JSON.stringify(payload)).replace(/=+$/g,"");
   const sig=Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(body,getAdminSecret_())).replace(/=+$/g,"");
   return body+"."+sig;
@@ -2349,7 +2436,7 @@ function loginAdmin_(data){
   if(adminHash_(admin.salt+":"+password)!==admin.hash){simpanLog_(username,"Login admin gagal","Username atau password salah");return{success:false,message:"Username atau password salah."};}
   getAdminSheet_().getRange(admin.row,9).setValue(new Date());
   simpanLog_(admin.username,"Login admin","Berhasil");
-  return{success:true,token:makeAdminToken_(admin),username:admin.username,nama:admin.nama,role:admin.role,persistent:true};
+  const tenant=getTenantContext_(); return{success:true,token:makeAdminToken_(admin),username:admin.username,nama:admin.nama,role:admin.role,tenant:{id:tenant.id,code:tenant.code,name:tenant.name},persistent:true};
 }
 function verifyAdminToken_(token){
   try{
@@ -2358,6 +2445,7 @@ function verifyAdminToken_(token){
     if(expected!==parts[1])return null;
     const payload=JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
     if(!payload.username)return null;
+    setTenantContext_(payload.tenantId || payload.tenantCode || DEFAULT_TENANT_CODE);
     const admin=findAdmin_(payload.username);
     if(!admin||admin.status.toLowerCase()!=="aktif")return null;
     if((Number(payload.version)||1)!==admin.version)return null;
@@ -2365,7 +2453,7 @@ function verifyAdminToken_(token){
   }catch(e){return null;}
 }
 function requireAdmin_(token){const admin=verifyAdminToken_(token);return admin?{success:true,admin}:{success:false,sessionExpired:true,message:"Sesi admin tidak valid. Silakan login kembali."};}
-function validateAdminSession_(token){const r=requireAdmin_(token);return r.success?{success:true,username:r.admin.username,nama:r.admin.nama,role:r.admin.role}:r;}
+function validateAdminSession_(token){const r=requireAdmin_(token);const t=getTenantContext_();return r.success?{success:true,username:r.admin.username,nama:r.admin.nama,role:r.admin.role,tenant:{id:t.id,code:t.code,name:t.name}}:r;}
 function listAdminAccounts_(token){
   const auth=requireAdmin_(token); if(!auth.success)return auth;
   if(auth.admin.role.toLowerCase()!=="owner")return{success:false,message:"Hanya Owner yang dapat mengelola akun admin."};
@@ -2444,6 +2532,7 @@ function sendPayrollEmail_(data){
 // Migrasi ringan dan pemeriksaan struktur tanpa menghapus data lama.
 // ============================================================
 function ensureSystemSchema_() {
+  ensureTenantRegistry_();
   const cache = CacheService.getScriptCache();
   if (cache.get("EMS_SCHEMA_V11_OK") === "1") return;
 
@@ -2469,7 +2558,7 @@ function ensureSystemSchema_() {
 }
 
 function ensureSheetHeader_(sheetName, headers) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getTenantSpreadsheet_();
   let sh = ss.getSheetByName(sheetName);
   if (!sh) sh = ss.insertSheet(sheetName);
 
@@ -2494,7 +2583,7 @@ function ensureSheetHeader_(sheetName, headers) {
 
 function getSystemHealth_() {
   ensureSystemSchema_();
-  const ss = SpreadsheetApp.getActive();
+  const ss = getTenantSpreadsheet_();
   const required = [
     SHEET_TOKO, SHEET_KARYAWAN, SHEET_SHIFT, SHEET_JADWAL,
     SHEET_ABSENSI, SHEET_IZIN, SHEET_LOG, SHEET_PENGATURAN,
