@@ -43,12 +43,54 @@ function ensureTenantRegistry_() {
     "ID Pelanggan","Kode Pelanggan","Nama Pelanggan","Spreadsheet ID","Folder Drive ID",
     "Paket","Status","Tanggal Mulai","Tanggal Berakhir","Maksimal Toko","Maksimal Karyawan","Dibuat Pada"
   ]);
+  repairTenantRegistry_(sh);
   const rows = sh.getLastRow() < 2 ? [] : sh.getRange(2,1,sh.getLastRow()-1,12).getValues();
-  if (!rows.some(r => String(r[0]||"").trim() === DEFAULT_TENANT_ID)) {
+  const hasDefault = rows.some(r =>
+    normalizeTenantKey_(r[0]) === DEFAULT_TENANT_ID ||
+    normalizeTenantKey_(r[1]) === DEFAULT_TENANT_CODE
+  );
+  if (!hasDefault) {
     const master = getMasterSpreadsheet_();
     sh.appendRow([DEFAULT_TENANT_ID,DEFAULT_TENANT_CODE,master.getName(),master.getId(),"","LEGACY","Aktif",new Date(),"",999,9999,new Date()]);
   }
   return sh;
+}
+
+function repairTenantRegistry_(sheet) {
+  const sh = sheet || ensureMasterSheetHeader_(SHEET_PELANGGAN, [
+    "ID Pelanggan","Kode Pelanggan","Nama Pelanggan","Spreadsheet ID","Folder Drive ID",
+    "Paket","Status","Tanggal Mulai","Tanggal Berakhir","Maksimal Toko","Maksimal Karyawan","Dibuat Pada"
+  ]);
+  if (sh.getLastRow() < 3) return { removed: 0 };
+  const values = sh.getRange(2,1,sh.getLastRow()-1,12).getValues();
+  const seen = new Map();
+  const removeRows = [];
+  values.forEach((row, index) => {
+    const id = normalizeTenantKey_(row[0]);
+    const code = normalizeTenantKey_(row[1]);
+    const spreadsheetId = String(row[3] || "").trim();
+    if (!id && !code) return;
+    const key = id || code;
+    const codeKey = code ? "CODE:" + code : "";
+    const idKey = id ? "ID:" + id : "";
+    let prior = (idKey && seen.get(idKey)) || (codeKey && seen.get(codeKey));
+    if (!prior) {
+      const entry = { index, row, spreadsheetId };
+      if (idKey) seen.set(idKey, entry);
+      if (codeKey) seen.set(codeKey, entry);
+      return;
+    }
+    // Record yang merujuk pelanggan yang sama dianggap duplikat. Pertahankan baris pertama.
+    const sameSheet = !prior.spreadsheetId || !spreadsheetId || prior.spreadsheetId === spreadsheetId;
+    if (sameSheet) removeRows.push(index + 2);
+  });
+  removeRows.sort((a,b)=>b-a).forEach(rowNumber => sh.deleteRow(rowNumber));
+  if (removeRows.length) {
+    try {
+      platformAudit_({username:"SYSTEM"},"Perbaikan integritas pelanggan","","",removeRows.length + " baris pelanggan duplikat dibersihkan otomatis");
+    } catch (_) {}
+  }
+  return { removed: removeRows.length };
 }
 function normalizeTenantKey_(value){ return String(value||"").trim().toUpperCase(); }
 function resolveTenant_(key) {
@@ -107,6 +149,7 @@ function doGet(e) {
   if (action === "getPlatformSummary") return json(getPlatformSummary_(e.parameter.platformToken));
   if (action === "listPlatformTenants") return json(listPlatformTenants_(e.parameter.platformToken));
   if (action === "listPlatformAudit") return json(listPlatformAudit_(e.parameter.platformToken, e.parameter.limit));
+  if (action === "repairPlatformData") return json(repairPlatformData_(e.parameter.platformToken));
 
   try { initializeTenantForGet_(e); } catch (error) { return json({success:false,message:error.message}); }
   ensureSystemSchema_();
@@ -2818,29 +2861,65 @@ function createTenantOwner_(ss,username,password,nama){
 }
 function savePlatformTenant_(data){
   const auth=requirePlatform_(data.platformToken);if(!auth.success)return auth;
-  const original=normalizeTenantKey_(data.originalCode),code=normalizeTenantKey_(data.code),name=String(data.name||"").trim();
-  const pkg=String(data.package||"Basic").trim(),status=String(data.status||"Aktif")==="Nonaktif"?"Nonaktif":"Aktif";
-  const start=data.startDate?new Date(data.startDate):new Date(),end=data.endDate?new Date(data.endDate):"",maxStores=Math.max(1,Number(data.maxStores)||1),maxEmployees=Math.max(1,Number(data.maxEmployees)||5);
-  if(!/^[A-Z0-9_-]{3,20}$/.test(code))return{success:false,message:"Kode pelanggan 3-20 karakter: huruf besar, angka, _ atau -."};
-  if(!name)return{success:false,message:"Nama pelanggan wajib diisi."};
-  const sh=ensureTenantRegistry_(),rows=platformTenantRows_();const existingIndex=rows.findIndex(r=>normalizeTenantKey_(r[1])===(original||code));const duplicate=rows.findIndex(r=>normalizeTenantKey_(r[1])===code);
-  if(duplicate>=0&&duplicate!==existingIndex)return{success:false,message:"Kode pelanggan sudah digunakan."};
-  if(existingIndex>=0){
-    const r=rows[existingIndex];sh.getRange(existingIndex+2,2,1,10).setValues([[code,name,r[3],r[4],pkg,status,start,end,maxStores,maxEmployees]]);
-    platformAudit_(auth.admin,"Memperbarui pelanggan",code,name,"Paket "+pkg+", status "+status);
-    return{success:true,message:"Data pelanggan berhasil diperbarui."};
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(30000))return{success:false,message:"Sistem sedang memproses pelanggan lain. Tunggu sebentar lalu coba lagi."};
+  let createdSpreadsheetId="",createdFolderId="";
+  try{
+    const original=normalizeTenantKey_(data.originalCode),code=normalizeTenantKey_(data.code),name=String(data.name||"").trim();
+    const pkg=String(data.package||"Basic").trim(),status=String(data.status||"Aktif")==="Nonaktif"?"Nonaktif":"Aktif";
+    const start=data.startDate?new Date(data.startDate):new Date(),end=data.endDate?new Date(data.endDate):"",maxStores=Math.max(1,Number(data.maxStores)||1),maxEmployees=Math.max(1,Number(data.maxEmployees)||5);
+    if(!/^[A-Z0-9_-]{3,20}$/.test(code))return{success:false,message:"Kode pelanggan 3-20 karakter: huruf besar, angka, _ atau -."};
+    if(!name)return{success:false,message:"Nama pelanggan wajib diisi."};
+    const sh=ensureTenantRegistry_();
+    repairTenantRegistry_(sh);
+    const rows=platformTenantRows_();
+    const existingIndex=rows.findIndex(r=>normalizeTenantKey_(r[1])===(original||code));
+    const duplicateCode=rows.findIndex(r=>normalizeTenantKey_(r[1])===code);
+    if(duplicateCode>=0&&duplicateCode!==existingIndex)return{success:false,message:"Kode pelanggan sudah digunakan."};
+    if(existingIndex>=0){
+      const r=rows[existingIndex];
+      sh.getRange(existingIndex+2,2,1,10).setValues([[code,name,r[3],r[4],pkg,status,start,end,maxStores,maxEmployees]]);
+      platformAudit_(auth.admin,"Memperbarui pelanggan",code,name,"Paket "+pkg+", status "+status);
+      return{success:true,message:"Data pelanggan berhasil diperbarui."};
+    }
+    const ownerUsername=String(data.ownerUsername||"owner").trim(),ownerPassword=String(data.ownerPassword||"");
+    if(ownerUsername.length<4)return{success:false,message:"Username Owner Pelanggan minimal 4 karakter."};
+    if(ownerPassword.length<8)return{success:false,message:"Password Owner Pelanggan minimal 8 karakter."};
+
+    const id=nextTenantId_();
+    if(rows.some(r=>normalizeTenantKey_(r[0])===id))return{success:false,message:"ID pelanggan bentrok. Silakan coba lagi."};
+
+    const folder=DriveApp.createFolder("EMS - "+name+" ["+code+"]");
+    createdFolderId=folder.getId();
+    const ss=provisionTenantSpreadsheet_(name,createdFolderId);
+    createdSpreadsheetId=ss.getId();
+    createTenantOwner_(ss,ownerUsername,ownerPassword,String(data.ownerName||name).trim());
+    const peng=ss.getSheetByName("Pengaturan");
+    peng.getRange(2,1,3,2).setValues([["FOLDER_DRIVE_ID",createdFolderId],["TENANT_CODE",code],["TENANT_ID",id]]);
+    const storeName=String(data.storeName||"").trim();
+    if(storeName){
+      ss.getSheetByName("Toko").appendRow([String(data.storeId||"T001").trim()||"T001",storeName,String(data.storeAddress||""),Number(data.latitude)||0,Number(data.longitude)||0,Number(data.radius)||50]);
+    }
+    sh.appendRow([id,code,name,createdSpreadsheetId,createdFolderId,pkg,status,start,end,maxStores,maxEmployees,new Date()]);
+    platformAudit_(auth.admin,"Membuat pelanggan",code,name,"Paket "+pkg+"; owner "+ownerUsername);
+    return{success:true,message:"Pelanggan berhasil dibuat.",tenant:{id,code,name,spreadsheetId:createdSpreadsheetId,folderId:createdFolderId}};
+  }catch(error){
+    // Rollback hanya untuk resource baru yang belum masuk registry.
+    try{if(createdSpreadsheetId)DriveApp.getFileById(createdSpreadsheetId).setTrashed(true);}catch(_){}
+    try{if(createdFolderId)DriveApp.getFolderById(createdFolderId).setTrashed(true);}catch(_){}
+    return{success:false,message:"Pelanggan belum berhasil dibuat: "+String(error&&error.message||error)};
+  }finally{
+    lock.releaseLock();
   }
-  const ownerUsername=String(data.ownerUsername||"owner").trim(),ownerPassword=String(data.ownerPassword||"");
-  if(ownerUsername.length<4)return{success:false,message:"Username Owner Pelanggan minimal 4 karakter."};
-  if(ownerPassword.length<8)return{success:false,message:"Password Owner Pelanggan minimal 8 karakter."};
-  const folder=DriveApp.createFolder("EMS - "+name+" ["+code+"]");const ss=provisionTenantSpreadsheet_(name,folder.getId());
-  createTenantOwner_(ss,ownerUsername,ownerPassword,String(data.ownerName||name).trim());
-  const peng=ss.getSheetByName("Pengaturan");peng.getRange(2,1,2,2).setValues([["FOLDER_DRIVE_ID",folder.getId()],["TENANT_CODE",code]]);
-  const storeName=String(data.storeName||"").trim();if(storeName){ss.getSheetByName("Toko").appendRow([String(data.storeId||"T001").trim()||"T001",storeName,String(data.storeAddress||""),Number(data.latitude)||0,Number(data.longitude)||0,Number(data.radius)||50]);}
-  const id=nextTenantId_();sh.appendRow([id,code,name,ss.getId(),folder.getId(),pkg,status,start,end,maxStores,maxEmployees,new Date()]);
-  platformAudit_(auth.admin,"Membuat pelanggan",code,name,"Paket "+pkg+"; owner "+ownerUsername);
-  return{success:true,message:"Pelanggan berhasil dibuat.",tenant:{id,code,name,spreadsheetId:ss.getId(),folderId:folder.getId()}};
 }
+
+function repairPlatformData_(token){
+  const auth=requirePlatform_(token);if(!auth.success)return auth;
+  const result=repairTenantRegistry_();
+  ensureTenantRegistry_();
+  return{success:true,message:result.removed?result.removed+" data duplikat dibersihkan.":"Data pelanggan sudah bersih.",removed:result.removed};
+}
+
 function setPlatformTenantStatus_(data){
   const auth=requirePlatform_(data.platformToken);if(!auth.success)return auth;const code=normalizeTenantKey_(data.code),status=String(data.status||"")==="Aktif"?"Aktif":"Nonaktif";
   if(code===DEFAULT_TENANT_CODE&&status==="Nonaktif")return{success:false,message:"Pelanggan DEFAULT tidak dapat dinonaktifkan dari panel."};

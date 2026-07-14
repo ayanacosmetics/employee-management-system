@@ -60,5 +60,12 @@ Owner Platform dapat membuat pelanggan baru. Sistem otomatis membuat spreadsheet
 - Seluruh modul tenant V11/V12 tetap dipertahankan.
 
 
-## V12.1.4
+## V12.1.5
 Perbaikan sesi Owner Platform menggunakan opaque server-side token.
+
+
+## V12.1.6 Data Integrity
+- Spreadsheet EMS awal tetap menjadi database pelanggan DEFAULT sekaligus registry platform.
+- Pelanggan baru memperoleh spreadsheet terpisah.
+- Duplikasi registry pelanggan dibersihkan otomatis berdasarkan ID/kode pelanggan.
+- Penyimpanan pelanggan memakai lock, validasi unik, pesan progres, dan rollback jika provisioning gagal.
