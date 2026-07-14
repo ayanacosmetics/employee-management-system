@@ -11,6 +11,7 @@ const SHEET_PAYROLL = "Payroll";
 const SHEET_ADMIN = "Admin";
 const SHEET_PELANGGAN = "Pelanggan";
 const SHEET_PLATFORM_ADMIN = "Platform Admin";
+const SHEET_PLATFORM_AUDIT = "Platform Audit";
 const DEFAULT_TENANT_ID = "PLG001";
 const DEFAULT_TENANT_CODE = "DEFAULT";
 let EMS_TENANT_CONTEXT = null;
@@ -105,6 +106,7 @@ function doGet(e) {
   if (action === "validatePlatformSession") return json(validatePlatformSession_(e.parameter.platformToken));
   if (action === "getPlatformSummary") return json(getPlatformSummary_(e.parameter.platformToken));
   if (action === "listPlatformTenants") return json(listPlatformTenants_(e.parameter.platformToken));
+  if (action === "listPlatformAudit") return json(listPlatformAudit_(e.parameter.platformToken, e.parameter.limit));
 
   try { initializeTenantForGet_(e); } catch (error) { return json({success:false,message:error.message}); }
   ensureSystemSchema_();
@@ -302,6 +304,7 @@ function doPost(e) {
   if (action === "loginPlatformOwner") return json(loginPlatformOwner_(data));
   if (action === "savePlatformTenant") return json(savePlatformTenant_(data));
   if (action === "setPlatformTenantStatus") return json(setPlatformTenantStatus_(data));
+  if (action === "platformImpersonateTenant") return json(platformImpersonateTenant_(data));
 
   try { initializeTenantForPost_(data); } catch (error) { return json({success:false,message:error.message}); }
 
@@ -2641,6 +2644,26 @@ function authorizeEmailAccess() {
 // EMS V12.1 - PANEL OWNER PLATFORM
 // Lapisan terpisah dari admin pelanggan. Tidak mengubah endpoint tenant lama.
 // ============================================================
+
+function getPlatformAuditSheet_(){
+  return ensureMasterSheetHeader_(SHEET_PLATFORM_AUDIT,["Waktu","Username Platform","Aktivitas","Kode Pelanggan","Nama Pelanggan","Keterangan"]);
+}
+function platformAudit_(admin,activity,tenantCode,tenantName,detail){
+  try{getPlatformAuditSheet_().appendRow([new Date(),admin&&admin.username||"",activity||"",tenantCode||"",tenantName||"",detail||""]);}catch(_){}
+}
+function listPlatformAudit_(token,limitInput){
+  const auth=requirePlatform_(token);if(!auth.success)return auth;
+  const sh=getPlatformAuditSheet_(),limit=Math.max(1,Math.min(200,Number(limitInput)||50));
+  if(sh.getLastRow()<2)return{success:true,items:[]};
+  const count=Math.min(limit,sh.getLastRow()-1),start=sh.getLastRow()-count+1;
+  const rows=sh.getRange(start,1,count,6).getValues().reverse();
+  return{success:true,items:rows.map(r=>({waktu:r[0]?formatDateTime_(r[0]):"",username:String(r[1]||""),aktivitas:String(r[2]||""),code:String(r[3]||""),name:String(r[4]||""),keterangan:String(r[5]||"")}))};
+}
+function tenantUsage_(item){
+  let stores=0,employees=0;
+  try{const ss=SpreadsheetApp.openById(item.spreadsheetId),a=ss.getSheetByName(SHEET_TOKO),b=ss.getSheetByName(SHEET_KARYAWAN);stores=a?Math.max(0,a.getLastRow()-1):0;employees=b?Math.max(0,b.getLastRow()-1):0;}catch(_){}
+  return{stores,employees};
+}
 function getPlatformAdminSheet_(){
   return ensureMasterSheetHeader_(SHEET_PLATFORM_ADMIN,["Username","Password Hash","Salt","Nama","Status","Version","Dibuat Pada","Login Terakhir"]);
 }
@@ -2683,16 +2706,19 @@ function requirePlatform_(token){const admin=verifyPlatformToken_(token);return 
 function validatePlatformSession_(token){const r=requirePlatform_(token);return r.success?{success:true,username:r.admin.username,nama:r.admin.nama}:r;}
 function setupPlatformOwner_(data){
   if(getPlatformSetupStatus_().configured)return{success:false,message:"Owner Platform sudah dikonfigurasi."};
-  const username=String(data.username||"").trim(),password=String(data.password||""),nama=String(data.nama||username).trim();
+  const username=String(data.username||"").trim(),password=String(data.password||"").trim(),confirm=String(data.confirmPassword||password).trim(),nama=String(data.nama||username).trim();
+  if(password!==confirm)return{success:false,message:"Konfirmasi password tidak sama."};
   if(username.length<4)return{success:false,message:"Username minimal 4 karakter."};
   if(password.length<8)return{success:false,message:"Password minimal 8 karakter."};
   const salt=Utilities.getUuid(); getPlatformAdminSheet_().appendRow([username,adminHash_(salt+":"+password),salt,nama,"Aktif",1,new Date(),""]);
+  platformAudit_({username},"Membuat Owner Platform","","","Akun platform pertama dibuat");
   return loginPlatformOwner_({username,password});
 }
 function loginPlatformOwner_(data){
   const username=String(data.username||"").trim(),password=String(data.password||""); const admin=findPlatformAdmin_(username);
   if(!admin||admin.status.toLowerCase()!=="aktif"||adminHash_(admin.salt+":"+password)!==admin.hash)return{success:false,message:"Username atau password salah."};
   getPlatformAdminSheet_().getRange(admin.row,8).setValue(new Date());
+  platformAudit_(admin,"Login Platform","","","Berhasil");
   return{success:true,token:makePlatformToken_(admin),username:admin.username,nama:admin.nama,persistent:true};
 }
 function platformDate_(value){if(!value)return"";const d=new Date(value);return isNaN(d)?String(value):Utilities.formatDate(d,Session.getScriptTimeZone(),"yyyy-MM-dd");}
@@ -2704,9 +2730,10 @@ function platformTenantItem_(r){
 }
 function getPlatformSummary_(token){
   const auth=requirePlatform_(token);if(!auth.success)return auth;const items=platformTenantRows_().map(platformTenantItem_);
-  return{success:true,summary:{total:items.length,active:items.filter(x=>x.status.toLowerCase()==="aktif").length,inactive:items.filter(x=>x.status.toLowerCase()!=="aktif").length,totalStoreLimit:items.reduce((a,x)=>a+x.maxStores,0),totalEmployeeLimit:items.reduce((a,x)=>a+x.maxEmployees,0)}};
+  let totalStores=0,totalEmployees=0;items.forEach(x=>{const u=tenantUsage_(x);totalStores+=u.stores;totalEmployees+=u.employees;});
+  return{success:true,summary:{total:items.length,active:items.filter(x=>x.status.toLowerCase()==="aktif").length,inactive:items.filter(x=>x.status.toLowerCase()!=="aktif").length,totalStores,totalEmployees,totalStoreLimit:items.reduce((a,x)=>a+x.maxStores,0),totalEmployeeLimit:items.reduce((a,x)=>a+x.maxEmployees,0)}};
 }
-function listPlatformTenants_(token){const auth=requirePlatform_(token);if(!auth.success)return auth;return{success:true,items:platformTenantRows_().map(platformTenantItem_)};}
+function listPlatformTenants_(token){const auth=requirePlatform_(token);if(!auth.success)return auth;const items=platformTenantRows_().map(platformTenantItem_).map(x=>Object.assign(x,tenantUsage_(x)));return{success:true,items};}
 function nextTenantId_(){
   const nums=platformTenantRows_().map(r=>Number(String(r[0]||"").replace(/\D/g,""))||0);return"PLG"+String(Math.max(0,...nums)+1).padStart(3,"0");
 }
@@ -2743,6 +2770,7 @@ function savePlatformTenant_(data){
   if(duplicate>=0&&duplicate!==existingIndex)return{success:false,message:"Kode pelanggan sudah digunakan."};
   if(existingIndex>=0){
     const r=rows[existingIndex];sh.getRange(existingIndex+2,2,1,10).setValues([[code,name,r[3],r[4],pkg,status,start,end,maxStores,maxEmployees]]);
+    platformAudit_(auth.admin,"Memperbarui pelanggan",code,name,"Paket "+pkg+", status "+status);
     return{success:true,message:"Data pelanggan berhasil diperbarui."};
   }
   const ownerUsername=String(data.ownerUsername||"owner").trim(),ownerPassword=String(data.ownerPassword||"");
@@ -2753,11 +2781,28 @@ function savePlatformTenant_(data){
   const peng=ss.getSheetByName("Pengaturan");peng.getRange(2,1,2,2).setValues([["FOLDER_DRIVE_ID",folder.getId()],["TENANT_CODE",code]]);
   const storeName=String(data.storeName||"").trim();if(storeName){ss.getSheetByName("Toko").appendRow([String(data.storeId||"T001").trim()||"T001",storeName,String(data.storeAddress||""),Number(data.latitude)||0,Number(data.longitude)||0,Number(data.radius)||50]);}
   const id=nextTenantId_();sh.appendRow([id,code,name,ss.getId(),folder.getId(),pkg,status,start,end,maxStores,maxEmployees,new Date()]);
+  platformAudit_(auth.admin,"Membuat pelanggan",code,name,"Paket "+pkg+"; owner "+ownerUsername);
   return{success:true,message:"Pelanggan berhasil dibuat.",tenant:{id,code,name,spreadsheetId:ss.getId(),folderId:folder.getId()}};
 }
 function setPlatformTenantStatus_(data){
   const auth=requirePlatform_(data.platformToken);if(!auth.success)return auth;const code=normalizeTenantKey_(data.code),status=String(data.status||"")==="Aktif"?"Aktif":"Nonaktif";
   if(code===DEFAULT_TENANT_CODE&&status==="Nonaktif")return{success:false,message:"Pelanggan DEFAULT tidak dapat dinonaktifkan dari panel."};
   const sh=ensureTenantRegistry_(),rows=platformTenantRows_(),i=rows.findIndex(r=>normalizeTenantKey_(r[1])===code);if(i<0)return{success:false,message:"Pelanggan tidak ditemukan."};
-  sh.getRange(i+2,7).setValue(status);return{success:true,message:"Status pelanggan berhasil diperbarui."};
+  sh.getRange(i+2,7).setValue(status);platformAudit_(auth.admin,status==="Aktif"?"Mengaktifkan pelanggan":"Menonaktifkan pelanggan",code,String(rows[i][2]||""),"");return{success:true,message:"Status pelanggan berhasil diperbarui."};
+}
+
+
+// V12.1.1: dukungan bantuan pelanggan dengan audit. Token admin tenant dibuat tanpa mengetahui password pelanggan.
+function platformImpersonateTenant_(data){
+  const auth=requirePlatform_(data.platformToken);if(!auth.success)return auth;
+  const code=normalizeTenantKey_(data.code),tenant=resolveTenant_(code);
+  if(!tenant)return{success:false,message:"Pelanggan tidak ditemukan."};
+  if(String(tenant.status||"").toLowerCase()!=="aktif")return{success:false,message:"Pelanggan sedang nonaktif."};
+  setTenantContext_(tenant.id||tenant.code);
+  const admins=adminRows_().map((r,i)=>({row:i+2,username:String(r[0]||""),nama:String(r[3]||r[0]||""),role:String(r[4]||"Admin"),status:String(r[5]||"Aktif"),version:Number(r[6])||1}));
+  const owner=admins.find(a=>a.status.toLowerCase()==="aktif"&&a.role.toLowerCase()==="owner")||admins.find(a=>a.status.toLowerCase()==="aktif");
+  if(!owner)return{success:false,message:"Pelanggan belum memiliki akun admin aktif."};
+  const token=makeAdminToken_(owner);
+  platformAudit_(auth.admin,"Login sebagai pelanggan",tenant.code,tenant.name,"Menggunakan akun "+owner.username);
+  return{success:true,token,username:owner.username,nama:owner.nama,role:owner.role,tenant:{id:tenant.id,code:tenant.code,name:tenant.name},impersonatedBy:auth.admin.username};
 }

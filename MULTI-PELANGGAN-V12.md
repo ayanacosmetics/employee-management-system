@@ -43,3 +43,14 @@ Halaman baru:
 - `platform.html`: daftar dan provisioning pelanggan.
 
 Owner Platform dapat membuat pelanggan baru. Sistem otomatis membuat spreadsheet terpisah, folder Drive, akun Owner Pelanggan, dan toko pertama opsional. Akun platform sengaja dipisahkan dari akun admin pelanggan.
+
+
+## V12.1.1 Platform Stability & Wizard
+
+- Perbaikan validasi konfirmasi password Owner Platform.
+- Wizard pembuatan akun Owner Platform pertama.
+- Wizard penambahan pelanggan bertahap.
+- Ringkasan penggunaan toko dan karyawan aktual.
+- Audit Log Platform.
+- Fitur Login Sebagai pelanggan dengan pencatatan audit.
+- Seluruh modul tenant V11/V12 tetap dipertahankan.
