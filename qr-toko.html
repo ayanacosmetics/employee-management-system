@@ -27,6 +27,7 @@
     const BASE_ABSEN_URL = `${window.location.origin}/absen.html`;
     const adminSession = JSON.parse(localStorage.getItem("ems_admin_session") || "null");
     const TENANT_CODE = String(adminSession?.tenant?.code || "DEFAULT").trim().toUpperCase();
+    let qrStores = [];
 
     function escapeHtml(value) {
       return String(value || "")
@@ -49,6 +50,7 @@
         }
 
         const items = Array.isArray(data.items) ? data.items : [];
+        qrStores = items;
 
         if (items.length === 0) {
           grid.innerHTML = "<p>Belum ada toko yang terdaftar.</p>";
@@ -120,80 +122,142 @@
       }
     }
 
-    let activePrintCard = null;
+    function getQrDataUrl(index) {
+      const box = document.getElementById(`qrStore-${index}`);
+      if (!box) return "";
 
-    function prepareQrForPrint(card) {
-      card.querySelectorAll("canvas").forEach(canvas => {
-        const existingImage = canvas.parentElement.querySelector("img.qr-print-fallback");
-        if (existingImage) return;
-
+      const canvas = box.querySelector("canvas");
+      if (canvas) {
         try {
-          const image = document.createElement("img");
-          image.className = "qr-print-fallback";
-          image.alt = "QR Absensi Toko";
-          image.src = canvas.toDataURL("image/png");
-          image.style.width = `${canvas.width}px`;
-          image.style.height = `${canvas.height}px`;
-          canvas.insertAdjacentElement("afterend", image);
+          return canvas.toDataURL("image/png");
         } catch (error) {
-          console.warn("QR tetap dicetak menggunakan canvas.", error);
+          console.warn("QR canvas tidak dapat dikonversi.", error);
         }
-      });
+      }
+
+      const image = box.querySelector("img");
+      return image ? image.src : "";
     }
 
-    function clearPrintState() {
-      document.querySelectorAll(".qr-card.print-active").forEach(card => {
-        card.classList.remove("print-active");
-      });
+    function xmlEscape(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&apos;");
+    }
 
-      document.querySelectorAll("img.qr-print-fallback").forEach(image => {
-        image.remove();
-      });
+    function buildPrintSvg(toko, qrDataUrl) {
+      const storeName = xmlEscape(toko.nama);
+      const storeId = xmlEscape(toko.id);
 
-      document.documentElement.classList.remove("is-printing-qr");
-      document.body.classList.remove("is-printing-qr");
-      activePrintCard = null;
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 794 1123" role="img" aria-label="QR Absensi ${storeName}">
+          <rect width="794" height="1123" fill="#ffffff"/>
+          <rect x="42" y="42" width="710" height="1039" rx="28" fill="#ffffff" stroke="#6d28d9" stroke-width="5"/>
+          <circle cx="690" cy="105" r="58" fill="#f1edff"/>
+          <circle cx="105" cy="1018" r="58" fill="#f5f3ff"/>
+
+          <g transform="translate(222 122)">
+            <rect x="0" y="0" width="68" height="68" rx="19" fill="#6d28d9"/>
+            <path d="M18 29h32v25H18z M23 21h22l5 8H18z M26 38v16 M42 38v16" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+            <text x="88" y="20" font-family="Arial, sans-serif" font-size="12" font-weight="800" letter-spacing="2" fill="#6d28d9">EMPLOYEE MANAGEMENT SYSTEM</text>
+            <text x="88" y="50" font-family="Arial, sans-serif" font-size="27" font-weight="800" fill="#171129">ABSENSI KARYAWAN</text>
+          </g>
+
+          <text x="397" y="247" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" letter-spacing="2" fill="#8a8d9e">LOKASI ABSENSI</text>
+          <text x="397" y="285" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="800" fill="#20154a">${storeName}</text>
+          <text x="397" y="326" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#666a7a">Scan QR menggunakan kamera HP untuk membuka halaman absensi.</text>
+
+          <rect x="237" y="359" width="320" height="320" rx="20" fill="#ffffff" stroke="#e6e0f5" stroke-width="3"/>
+          <image href="${qrDataUrl}" x="257" y="379" width="280" height="280" preserveAspectRatio="xMidYMid meet"/>
+
+          <g transform="translate(317 706)">
+            <rect width="160" height="38" rx="19" fill="#f1edff"/>
+            <text x="80" y="15" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="800" letter-spacing="1.5" fill="#6d28d9">ID TOKO</text>
+            <text x="80" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="800" fill="#4c1d95">${storeId}</text>
+          </g>
+
+          <g transform="translate(117 782)">
+            <g>
+              <rect width="170" height="92" rx="16" fill="#faf9ff" stroke="#ded7f2" stroke-width="2"/>
+              <circle cx="85" cy="31" r="18" fill="#6d28d9"/>
+              <text x="85" y="37" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="800" fill="#ffffff">1</text>
+              <text x="85" y="70" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#343746">Scan QR</text>
+            </g>
+            <g transform="translate(195 0)">
+              <rect width="170" height="92" rx="16" fill="#faf9ff" stroke="#ded7f2" stroke-width="2"/>
+              <circle cx="85" cy="31" r="18" fill="#6d28d9"/>
+              <text x="85" y="37" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="800" fill="#ffffff">2</text>
+              <text x="85" y="70" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#343746">Aktifkan GPS</text>
+            </g>
+            <g transform="translate(390 0)">
+              <rect width="170" height="92" rx="16" fill="#faf9ff" stroke="#ded7f2" stroke-width="2"/>
+              <circle cx="85" cy="31" r="18" fill="#6d28d9"/>
+              <text x="85" y="37" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="800" fill="#ffffff">3</text>
+              <text x="85" y="70" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#343746">Selfie &amp; PIN</text>
+            </g>
+          </g>
+
+          <g transform="translate(177 913)">
+            <rect width="440" height="64" rx="16" fill="#ecfdf3" stroke="#bbf7d0" stroke-width="2"/>
+            <circle cx="38" cy="32" r="15" fill="#16a34a"/>
+            <path d="M31 32l5 5 9-11" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            <text x="235" y="38" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#166534">Absensi hanya dapat dilakukan di dalam radius toko.</text>
+          </g>
+        </svg>`;
     }
 
     function printQr(index) {
-      clearPrintState();
+      const toko = qrStores[index];
+      const qrDataUrl = getQrDataUrl(index);
 
-      const target = document.querySelector(`.qr-card[data-store-index="${index}"]`);
-      if (!target) return;
+      if (!toko || !qrDataUrl) {
+        alert("QR belum siap. Tunggu sebentar lalu coba kembali.");
+        return;
+      }
 
-      activePrintCard = target;
-      prepareQrForPrint(target);
-      target.classList.add("print-active");
-      document.documentElement.classList.add("is-printing-qr");
-      document.body.classList.add("is-printing-qr");
+      const iframe = document.createElement("iframe");
+      iframe.setAttribute("aria-hidden", "true");
+      iframe.style.position = "fixed";
+      iframe.style.width = "1px";
+      iframe.style.height = "1px";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.border = "0";
+      iframe.style.opacity = "0";
+      document.body.appendChild(iframe);
 
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => window.print());
-      });
-    }
+      const printDocument = iframe.contentDocument || iframe.contentWindow.document;
+      printDocument.open();
+      printDocument.write(`<!doctype html>
+        <html lang="id">
+          <head>
+            <meta charset="utf-8">
+            <title>QR Absensi - ${escapeHtml(toko.nama)}</title>
+            <style>
+              @page { size: A4 portrait; margin: 0; }
+              html, body { width: 210mm; height: 297mm; margin: 0; padding: 0; background: #fff; overflow: hidden; }
+              body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+              svg { display: block; width: 210mm; height: 297mm; }
+            </style>
+          </head>
+          <body>${buildPrintSvg(toko, qrDataUrl)}</body>
+        </html>`);
+      printDocument.close();
 
-    window.addEventListener("afterprint", clearPrintState);
-
-    const printMedia = window.matchMedia ? window.matchMedia("print") : null;
-    if (printMedia) {
-      const handlePrintChange = event => {
-        if (!event.matches) {
-          window.setTimeout(clearPrintState, 50);
-        }
+      const cleanup = () => {
+        window.setTimeout(() => iframe.remove(), 300);
       };
 
-      if (typeof printMedia.addEventListener === "function") {
-        printMedia.addEventListener("change", handlePrintChange);
-      } else if (typeof printMedia.addListener === "function") {
-        printMedia.addListener(handlePrintChange);
-      }
+      iframe.contentWindow.addEventListener("afterprint", cleanup, { once: true });
+      window.setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        window.setTimeout(cleanup, 2000);
+      }, 250);
     }
-
-    window.addEventListener("focus", () => {
-      if (activePrintCard) {
-        window.setTimeout(clearPrintState, 250);
-      }
-    });
 
     loadQrToko();
   </script>
