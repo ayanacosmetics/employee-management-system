@@ -5,11 +5,60 @@
 <section id="done" class="screen"><div class="success">✓</div><h1 style="text-align:center">Platform siap digunakan</h1><p style="text-align:center">Akun Owner Platform berhasil dibuat.</p><div class="actions"><button class="primary" type="button" onclick="location.replace('platform.html')">Masuk Dashboard Platform</button></div></section>
 <section id="login" class="screen"><h1>Masuk Owner Platform</h1><p>Kelola pelanggan, paket, dan operasional platform.</p><form id="loginForm"><label class="field">Username<input id="loginUsername" autocomplete="username" required></label><label class="field">Password<input id="loginPassword" type="password" autocomplete="current-password" required></label><div id="loginError" class="error"></div><button id="loginBtn" class="primary">Masuk</button></form></section>
 </main><script src="js/config.js"></script><script>
-const KEY='ems_platform_session';let configured=false;const screens=['welcome','setup','done'];
+const KEY='ems_platform_session';
+let configured=false;
+const screens=['welcome','setup','done'];
+const el={
+  steps:document.getElementById('steps'),
+  setupForm:document.getElementById('setupForm'),
+  nama:document.getElementById('nama'),
+  username:document.getElementById('username'),
+  password:document.getElementById('password'),
+  confirmPassword:document.getElementById('confirm'),
+  setupError:document.getElementById('setupError'),
+  createBtn:document.getElementById('createBtn'),
+  loginForm:document.getElementById('loginForm'),
+  loginUsername:document.getElementById('loginUsername'),
+  loginPassword:document.getElementById('loginPassword'),
+  loginError:document.getElementById('loginError'),
+  loginBtn:document.getElementById('loginBtn')
+};
 function setDots(n){document.querySelectorAll('.step-dot').forEach((x,i)=>x.classList.toggle('active',i<=n))}
 function go(n){screens.forEach((id,i)=>document.getElementById(id).classList.toggle('active',i===n));document.getElementById('login').classList.remove('active');setDots(n)}
 async function api(body){const r=await fetch(EMS_API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});const text=await r.text();try{return JSON.parse(text)}catch(_){throw new Error('Respons server tidak valid.')}}
-async function init(){try{const d=await(await fetch(`${EMS_API_URL}?action=getPlatformSetupStatus&t=${Date.now()}`,{cache:'no-store'})).json();configured=!!d.configured;if(configured){document.getElementById('steps').hidden=true;screens.forEach(id=>document.getElementById(id).classList.remove('active'));document.getElementById('login').classList.add('active')}}catch(e){document.getElementById('setupError').textContent='Gagal terhubung ke server.'}}
-setupForm.onsubmit=async e=>{e.preventDefault();setupError.textContent='';const pass=password.value.trim(),conf=confirm.value.trim();if(pass.length<8){setupError.textContent='Password minimal 8 karakter.';return}if(pass!==conf){setupError.textContent='Ulangi password tidak sama.';return}createBtn.disabled=true;try{const d=await api({action:'setupPlatformOwner',nama:nama.value.trim(),username:username.value.trim(),password:pass,confirmPassword:conf});if(!d.success)throw new Error(d.message||'Gagal membuat akun.');localStorage.setItem(KEY,JSON.stringify({token:d.token,username:d.username,nama:d.nama||d.username}));go(2)}catch(e){setupError.textContent=e.message}finally{createBtn.disabled=false}};
-loginForm.onsubmit=async e=>{e.preventDefault();loginError.textContent='';loginBtn.disabled=true;try{const d=await api({action:'loginPlatformOwner',username:loginUsername.value.trim(),password:loginPassword.value});if(!d.success)throw new Error(d.message||'Login gagal.');localStorage.setItem(KEY,JSON.stringify({token:d.token,username:d.username,nama:d.nama||d.username}));location.replace('platform.html')}catch(e){loginError.textContent=e.message}finally{loginBtn.disabled=false}};init();
+async function init(){try{const d=await(await fetch(`${EMS_API_URL}?action=getPlatformSetupStatus&t=${Date.now()}`,{cache:'no-store'})).json();configured=!!d.configured;if(configured){el.steps.hidden=true;screens.forEach(id=>document.getElementById(id).classList.remove('active'));document.getElementById('login').classList.add('active')}}catch(e){el.setupError.textContent='Gagal terhubung ke server.'}}
+el.setupForm.addEventListener('submit',async e=>{
+  e.preventDefault();
+  el.setupError.textContent='';
+  const pass=el.password.value.trim();
+  const conf=el.confirmPassword.value.trim();
+  const namaValue=el.nama.value.trim();
+  const usernameValue=el.username.value.trim();
+  if(!namaValue){el.setupError.textContent='Nama wajib diisi.';return}
+  if(usernameValue.length<4){el.setupError.textContent='Username minimal 4 karakter.';return}
+  if(pass.length<8){el.setupError.textContent='Password minimal 8 karakter.';return}
+  if(pass!==conf){el.setupError.textContent='Ulangi password tidak sama.';return}
+  el.createBtn.disabled=true;
+  el.createBtn.textContent='Membuat akun...';
+  try{
+    const d=await api({action:'setupPlatformOwner',nama:namaValue,username:usernameValue,password:pass,confirmPassword:conf});
+    if(!d.success)throw new Error(d.message||'Gagal membuat akun.');
+    localStorage.setItem(KEY,JSON.stringify({token:d.token,username:d.username,nama:d.nama||d.username}));
+    go(2);
+  }catch(err){el.setupError.textContent=err.message||'Gagal membuat akun.'}
+  finally{el.createBtn.disabled=false;el.createBtn.textContent='Buat Akun'}
+});
+el.loginForm.addEventListener('submit',async e=>{
+  e.preventDefault();
+  el.loginError.textContent='';
+  el.loginBtn.disabled=true;
+  try{
+    const d=await api({action:'loginPlatformOwner',username:el.loginUsername.value.trim(),password:el.loginPassword.value});
+    if(!d.success)throw new Error(d.message||'Login gagal.');
+    localStorage.setItem(KEY,JSON.stringify({token:d.token,username:d.username,nama:d.nama||d.username}));
+    location.replace('platform.html');
+  }catch(err){el.loginError.textContent=err.message||'Login gagal.'}
+  finally{el.loginBtn.disabled=false}
+});
+init();
 </script></body></html>
